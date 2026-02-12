@@ -112,6 +112,9 @@
   // ===== Game tuning =====
   const TRACK_TOP_MARGIN = 120;
   const TRACK_BOTTOM_MARGIN = 110;
+  const BASE_SPEED = 3.2;
+  const FAST_SPEED_THRESHOLD = 5.0;
+  const MAX_SPEED = 8.5;
 
   const skier = {
     x: 170,
@@ -119,13 +122,12 @@
     vy: 0,
     radius: 18,
     lean: 0,       // visual tilt
-    stamina: 1.0,  // 0..1
   };
 
   const world = {
     t: 0,
-    speed: 3.2,
-    targetSpeed: 3.2,
+    speed: BASE_SPEED,
+    targetSpeed: BASE_SPEED,
     distance: 0, // meters-ish
     score: 0,
     alive: true,
@@ -598,8 +600,8 @@
     snowPuffs.length = 0;
 
     world.t = 0;
-    world.speed = 3.2;
-    world.targetSpeed = 3.2;
+    world.speed = BASE_SPEED;
+    world.targetSpeed = BASE_SPEED;
     world.distance = 0;
     world.score = 0;
     world.alive = true;
@@ -608,7 +610,6 @@
     skier.y = innerHeight*0.70;
     skier.vy = 0;
     skier.lean = 0;
-    skier.stamina = 1.0;
 
     overlay.style.display = "none";
   }
@@ -636,19 +637,15 @@
     const stride = pressed("KeyW") || pressed("ArrowUp") || pressed("Space");
     const brake = pressed("KeyS") || pressed("ArrowDown");
 
-    // stamina regen
-    skier.stamina = clamp(skier.stamina + dt*0.10, 0, 1);
-
     // speed control
-    world.targetSpeed = 3.2 + Math.min(4.2, world.distance/900) * 0.55; // gently gets faster
-    if (stride && skier.stamina > 0.08) {
-      world.targetSpeed += 1.6;
-      skier.stamina -= dt*0.32;
+    world.targetSpeed = BASE_SPEED + Math.min(4.2, world.distance/900) * 0.55; // gently gets faster
+    if (stride) {
+      world.targetSpeed += 1.2;
       if (Math.random() < 0.25) puff(skier.x-10, skier.y+18, 4);
     }
     if (brake) world.targetSpeed -= 2.0;
 
-    world.targetSpeed = clamp(world.targetSpeed, 1.2, 8.5);
+    world.targetSpeed = clamp(world.targetSpeed, 1.2, MAX_SPEED);
     world.speed = lerp(world.speed, world.targetSpeed, 1 - Math.pow(0.001, dt)); // smooth
 
     // vertical motion
@@ -667,7 +664,11 @@
 
     // distance & score
     world.distance += world.speed * 26 * dt; // meters-ish
-    world.score += world.speed * 2.2 * dt;   // base score
+    const fastSpan = Math.max(0.001, MAX_SPEED - FAST_SPEED_THRESHOLD);
+    const fastRatio = clamp((world.speed - FAST_SPEED_THRESHOLD) / fastSpan, 0, 1);
+    const fastScore = 24 * fastRatio * dt; // reward time spent fast
+    const brakePenalty = brake ? (8 + Math.max(0, BASE_SPEED - world.speed) * 4) * dt : 0;
+    world.score = Math.max(0, world.score + fastScore - brakePenalty);
 
     // spawn obstacles/pickups
     spawnTimer -= dt * (0.9 + world.speed/6);
@@ -817,9 +818,6 @@
     ctx.fillRect(0,0,w,h);
     ctx.restore();
 
-    // stamina meter
-    drawStaminaBar();
-
     ctx.restore();
   }
 
@@ -840,38 +838,6 @@
       ctx.closePath();
       ctx.fill();
     }
-    ctx.restore();
-  }
-
-  function drawStaminaBar() {
-    const w = innerWidth, h = innerHeight;
-    const x = 12, y = h - 34;
-    const bw = 180, bh = 14;
-
-    ctx.save();
-    ctx.globalAlpha = 0.9;
-    ctx.fillStyle = "rgba(255,255,255,0.10)";
-    ctx.strokeStyle = "rgba(255,255,255,0.16)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.roundRect(x, y, bw, bh, 8);
-    ctx.fill();
-    ctx.stroke();
-
-    // fill (no hard-coded color? It's UI; keeping subtle icy)
-    const fillW = Math.max(0, (bw-4) * skier.stamina);
-    const g = ctx.createLinearGradient(x,0,x+bw,0);
-    g.addColorStop(0, "rgba(110,255,210,0.65)");
-    g.addColorStop(1, "rgba(120,140,255,0.55)");
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.roundRect(x+2, y+2, fillW, bh-4, 6);
-    ctx.fill();
-
-    ctx.fillStyle = "rgba(255,255,255,0.85)";
-    ctx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
-    ctx.fillText("Stamina", x + bw + 10, y + 12);
-
     ctx.restore();
   }
 
