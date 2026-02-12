@@ -87,7 +87,7 @@
     <div class="hint">
       Move: <span class="kbd">A</span>/<span class="kbd">D</span> or <span class="kbd">←</span>/<span class="kbd">→</span> ·
       Go fast: <span class="kbd">W</span>/<span class="kbd">↑</span>/<span class="kbd">Space</span> ·
-      Brake: <span class="kbd">S</span>/<span class="kbd">↓</span> · Mute: <span class="kbd">M</span>
+      Brake: <span class="kbd">S</span>/<span class="kbd">↓</span> · Mute: <span class="kbd">M</span> · Chill: <span class="kbd">C</span>
     </div>
     <div class="help-panel" id="helpPanel" style="display:none;">
       <h2>How to play</h2>
@@ -121,6 +121,7 @@
   resize();
 
   // ===== HUD =====
+  const hud      = document.getElementById('hud');
   const scorePill = document.getElementById('scorePill');
   const distPill  = document.getElementById('distPill');
   const speedPill = document.getElementById('speedPill');
@@ -139,10 +140,26 @@
     helpPanel.style.display = open ? "block" : "none";
   }
 
+  function enterChillMode() {
+    world.chillMode = true;
+    world.alive = true;
+    world.shake = 0;
+    obstacles.length = 0;
+    pickups.length = 0;
+    overlay.style.display = "none";
+    setHelpOpen(false);
+    hud.style.display = "none";
+  }
+
   // ===== Input =====
   const keys = new Set();
   addEventListener('keydown', (e) => {
     audio.ensureStarted();
+    if (e.code === "KeyC") {
+      if (world.chillMode) location.reload();
+      else enterChillMode();
+      return;
+    }
     if (e.code === "KeyM") {
       audio.toggleMute();
       return;
@@ -198,6 +215,7 @@
     distance: 0, // meters-ish
     score: 0,
     alive: true,
+    chillMode: false,
     shake: 0,
     auroraPhase: 0,
   };
@@ -959,6 +977,7 @@
     world.distance = 0;
     world.score = 0;
     world.alive = true;
+    world.chillMode = false;
     world.shake = 0;
 
     const { top, bot } = getTrackBounds();
@@ -967,6 +986,7 @@
     skier.lean = 0;
 
     overlay.style.display = "none";
+    hud.style.display = "";
     audio.onReset();
   }
 
@@ -1020,25 +1040,29 @@
 
     // distance & score
     world.distance += world.speed * 26 * dt; // meters-ish
-    const speedRatio = world.speed / BASE_SPEED;
-    const speedMultiplier = speedRatio * (1 + FAST_RAMP_BONUS * Math.max(0, speedRatio - 1));
-    world.score += BASE_SCORE_RATE * world.speed * speedMultiplier * dt;
-
-    // spawn obstacles/pickups
-    spawnTimer -= dt * (0.9 + world.speed/6);
-    berryTimer -= dt * (0.8 + world.speed/8);
-
-    if (spawnTimer <= 0) {
-      spawnTimer = rand(0.38, 0.72);
-      const roll = Math.random();
-      if (roll < 0.52) spawnTree();
-      else if (roll < 0.86) spawnRock();
-      else spawnReindeer();
+    if (!world.chillMode) {
+      const speedRatio = world.speed / BASE_SPEED;
+      const speedMultiplier = speedRatio * (1 + FAST_RAMP_BONUS * Math.max(0, speedRatio - 1));
+      world.score += BASE_SCORE_RATE * world.speed * speedMultiplier * dt;
     }
 
-    if (berryTimer <= 0) {
-      berryTimer = rand(0.7, 1.4);
-      if (Math.random() < 0.75) spawnBerries();
+    // spawn obstacles/pickups
+    if (!world.chillMode) {
+      spawnTimer -= dt * (0.9 + world.speed/6);
+      berryTimer -= dt * (0.8 + world.speed/8);
+
+      if (spawnTimer <= 0) {
+        spawnTimer = rand(0.38, 0.72);
+        const roll = Math.random();
+        if (roll < 0.52) spawnTree();
+        else if (roll < 0.86) spawnRock();
+        else spawnReindeer();
+      }
+
+      if (berryTimer <= 0) {
+        berryTimer = rand(0.7, 1.4);
+        if (Math.random() < 0.75) spawnBerries();
+      }
     }
 
     // move obstacles/pickups left based on speed
@@ -1069,28 +1093,34 @@
     }
 
     // collisions
-    for (const o of obstacles) {
-      const r = (o.type==="tree") ? o.r*0.62 : (o.type==="rock" ? o.r*0.85 : o.r*0.90);
-      if (circleHit(skier.x, skier.y, skier.radius, o.x, o.y, r)) {
-        crash(o.type);
-        break;
+    if (!world.chillMode) {
+      for (const o of obstacles) {
+        const r = (o.type==="tree") ? o.r*0.62 : (o.type==="rock" ? o.r*0.85 : o.r*0.90);
+        if (circleHit(skier.x, skier.y, skier.radius, o.x, o.y, r)) {
+          crash(o.type);
+          break;
+        }
       }
     }
 
-    for (let i=pickups.length-1;i>=0;i--){
-      const p = pickups[i];
-      if (circleHit(skier.x, skier.y, skier.radius, p.x, p.y, p.r)) {
-        world.score += p.value;
-        puff(p.x, p.y, 10);
-        audio.onPickup();
-        pickups.splice(i,1);
+    if (!world.chillMode) {
+      for (let i=pickups.length-1;i>=0;i--){
+        const p = pickups[i];
+        if (circleHit(skier.x, skier.y, skier.radius, p.x, p.y, p.r)) {
+          world.score += p.value;
+          puff(p.x, p.y, 10);
+          audio.onPickup();
+          pickups.splice(i,1);
+        }
       }
     }
 
     // update HUD
-    scorePill.textContent = `Score: ${Math.floor(world.score)}`;
-    distPill.textContent = `Distance: ${Math.floor(world.distance)} m`;
-    speedPill.textContent = `Speed: ${world.speed.toFixed(1)}`;
+    if (!world.chillMode) {
+      scorePill.textContent = `Score: ${Math.floor(world.score)}`;
+      distPill.textContent = `Distance: ${Math.floor(world.distance)} m`;
+      speedPill.textContent = `Speed: ${world.speed.toFixed(1)}`;
+    }
   }
 
   function crash(type) {
