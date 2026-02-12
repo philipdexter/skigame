@@ -19,6 +19,7 @@ Ski as long as possible, avoid obstacles, and maximize score.
 - Go fast: `W`, `Up Arrow`, or `Space`
 - Brake: `S` or `Down Arrow`
 - Restart after crash: `R`
+- Toggle audio mute: `M`
 - Toggle help panel: `H`
 - Close help panel: `Esc`
 
