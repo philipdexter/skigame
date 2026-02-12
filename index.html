@@ -158,12 +158,21 @@
   const pressed = (code) => keys.has(code);
 
   // ===== Game tuning =====
-  const TRACK_TOP_MARGIN = 120;
+  const TRACK_TOP_MARGIN = 8;
   const TRACK_BOTTOM_MARGIN = 110;
   const BASE_SPEED = 3.2;
   const MAX_SPEED = 8.5;
   const BASE_SCORE_RATE = 2.2;
   const FAST_RAMP_BONUS = 0.45;
+  const PLAYER_TOP_PADDING = 6;
+  const PLAYER_BOTTOM_PADDING = 20;
+
+  function getTrackBounds(h = innerHeight) {
+    // Keep playable lanes inside the visible snow band.
+    const top = h * 0.55 + TRACK_TOP_MARGIN;
+    const bot = h - TRACK_BOTTOM_MARGIN;
+    return { top, bot };
+  }
 
   const skier = {
     x: 170,
@@ -200,7 +209,8 @@
   const snowPuffs = []; // particles
 
   function spawnTree() {
-    const laneY = rand(TRACK_TOP_MARGIN+20, innerHeight-TRACK_BOTTOM_MARGIN-20);
+    const { top, bot } = getTrackBounds();
+    const laneY = rand(top + 20, bot - 20);
     obstacles.push({
       type: "tree",
       x: innerWidth + rand(40, 200),
@@ -211,7 +221,8 @@
   }
 
   function spawnRock() {
-    const laneY = rand(TRACK_TOP_MARGIN+30, innerHeight-TRACK_BOTTOM_MARGIN-30);
+    const { top, bot } = getTrackBounds();
+    const laneY = rand(top + 30, bot - 30);
     obstacles.push({
       type: "rock",
       x: innerWidth + rand(40, 220),
@@ -223,7 +234,8 @@
 
   function spawnReindeer() {
     // Reindeer crosses slowly — small window to slip by.
-    const laneY = rand(TRACK_TOP_MARGIN+40, innerHeight-TRACK_BOTTOM_MARGIN-40);
+    const { top, bot } = getTrackBounds();
+    const laneY = rand(top + 40, bot - 40);
     obstacles.push({
       type: "reindeer",
       x: innerWidth + rand(80, 280),
@@ -235,7 +247,8 @@
   }
 
   function spawnBerries() {
-    const laneY = rand(TRACK_TOP_MARGIN+30, innerHeight-TRACK_BOTTOM_MARGIN-30);
+    const { top, bot } = getTrackBounds();
+    const laneY = rand(top + 30, bot - 30);
     pickups.push({
       type: "berries",
       x: innerWidth + rand(80, 240),
@@ -358,8 +371,7 @@
     ctx.fillRect(0, h*0.55, w, h*0.45);
 
     // track (two grooves)
-    const top = TRACK_TOP_MARGIN;
-    const bot = h - TRACK_BOTTOM_MARGIN;
+    const { top, bot } = getTrackBounds(h);
     const trackH = bot - top;
 
     // subtle fog
@@ -656,7 +668,8 @@
     world.alive = true;
     world.shake = 0;
 
-    skier.y = innerHeight*0.70;
+    const { top, bot } = getTrackBounds();
+    skier.y = top + (bot - top) * 0.62;
     skier.vy = 0;
     skier.lean = 0;
 
@@ -703,9 +716,8 @@
     skier.vy *= Math.pow(0.001, dt); // strong damping
     skier.y += skier.vy * dt;
 
-    const top = TRACK_TOP_MARGIN;
-    const bot = innerHeight - TRACK_BOTTOM_MARGIN;
-    skier.y = clamp(skier.y, top+20, bot-20);
+    const { top, bot } = getTrackBounds();
+    skier.y = clamp(skier.y, top + PLAYER_TOP_PADDING, bot - PLAYER_BOTTOM_PADDING);
 
     // lean visual
     const desiredLean = clamp(skier.vy/650, -0.35, 0.35);
