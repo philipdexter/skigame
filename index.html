@@ -414,6 +414,7 @@
       ctx.stroke();
     }
     ctx.restore();
+
   }
 
   // ===== Draw obstacles/pickups =====
@@ -839,6 +840,7 @@
     drawSky();
     drawFells();
     drawGroundAndTrack();
+    drawBottomFence();
 
     // distant trees parallax silhouettes at horizon
     drawHorizonSpruceBelt();
@@ -897,6 +899,56 @@
       ctx.closePath();
       ctx.fill();
     }
+    ctx.restore();
+  }
+
+  function drawBottomFence() {
+    const w = innerWidth, h = innerHeight;
+    const { bot } = getTrackBounds(h);
+    const baseY = bot + 14;
+    const spacing = 84;
+    const postW = 8;
+    const postH = 42;
+    const railH = 5;
+    const scroll = (world.distance * 1.15) % spacing;
+
+    ctx.save();
+    ctx.globalAlpha = 0.94;
+
+    // rails between posts
+    for (let x = -spacing * 2; x <= w + spacing * 2; x += spacing) {
+      const px = Math.round(x - scroll);
+
+      const y1 = Math.round(baseY - 16);
+      const y2 = Math.round(baseY - 1);
+
+      ctx.fillStyle = "#805737";
+      ctx.fillRect(px + Math.floor(postW / 2), y1, spacing - postW, railH);
+      ctx.fillRect(px + Math.floor(postW / 2), y2, spacing - postW, railH);
+
+      // darker seam so rails don't look flat
+      ctx.fillStyle = "rgba(64,42,26,0.45)";
+      ctx.fillRect(px + Math.floor(postW / 2), y1 + railH - 1, spacing - postW, 1);
+      ctx.fillRect(px + Math.floor(postW / 2), y2 + railH - 1, spacing - postW, 1);
+    }
+
+    // posts
+    for (let x = -spacing * 2; x <= w + spacing * 2; x += spacing) {
+      const px = Math.round(x - scroll);
+      const py = Math.round(baseY - postH);
+
+      ctx.fillStyle = "#7a5233";
+      ctx.fillRect(px - Math.floor(postW / 2), py, postW, postH + 14);
+
+      // subtle right-edge shading
+      ctx.fillStyle = "rgba(58,36,21,0.35)";
+      ctx.fillRect(px + Math.floor(postW / 2) - 2, py, 2, postH + 14);
+
+      // snow cap
+      ctx.fillStyle = "rgba(236,246,255,0.85)";
+      ctx.fillRect(px - Math.floor(postW / 2) - 1, py - 2, postW + 2, 3);
+    }
+
     ctx.restore();
   }
 
