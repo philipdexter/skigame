@@ -113,8 +113,9 @@
   const TRACK_TOP_MARGIN = 120;
   const TRACK_BOTTOM_MARGIN = 110;
   const BASE_SPEED = 3.2;
-  const FAST_SPEED_THRESHOLD = 5.0;
   const MAX_SPEED = 8.5;
+  const BASE_SCORE_RATE = 2.2;
+  const FAST_RAMP_BONUS = 0.45;
 
   const skier = {
     x: 170,
@@ -664,11 +665,9 @@
 
     // distance & score
     world.distance += world.speed * 26 * dt; // meters-ish
-    const fastSpan = Math.max(0.001, MAX_SPEED - FAST_SPEED_THRESHOLD);
-    const fastRatio = clamp((world.speed - FAST_SPEED_THRESHOLD) / fastSpan, 0, 1);
-    const fastScore = 24 * fastRatio * dt; // reward time spent fast
-    const brakePenalty = brake ? (8 + Math.max(0, BASE_SPEED - world.speed) * 4) * dt : 0;
-    world.score = Math.max(0, world.score + fastScore - brakePenalty);
+    const speedRatio = world.speed / BASE_SPEED;
+    const speedMultiplier = speedRatio * (1 + FAST_RAMP_BONUS * Math.max(0, speedRatio - 1));
+    world.score += BASE_SCORE_RATE * world.speed * speedMultiplier * dt;
 
     // spawn obstacles/pickups
     spawnTimer -= dt * (0.9 + world.speed/6);
