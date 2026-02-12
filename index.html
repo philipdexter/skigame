@@ -1,0 +1,882 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Lappish XC Glide</title>
+  <style>
+    html, body { margin:0; height:100%; background:#07111f; overflow:hidden; }
+    canvas { display:block; width:100vw; height:100vh; image-rendering:auto; }
+    .hud {
+      position: fixed; left: 12px; top: 12px;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      color: rgba(255,255,255,0.92);
+      text-shadow: 0 2px 12px rgba(0,0,0,0.6);
+      user-select:none;
+      line-height: 1.25;
+      max-width: min(560px, calc(100vw - 24px));
+    }
+    .hud .row { display:flex; gap:14px; flex-wrap:wrap; align-items:baseline; }
+    .pill {
+      padding: 6px 10px; border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.12);
+      backdrop-filter: blur(6px);
+      font-size: 14px;
+    }
+    .hint { opacity:0.9; font-size: 13px; margin-top: 8px; }
+    .center {
+      position: fixed; inset:0; display:flex; align-items:center; justify-content:center;
+      pointer-events:none;
+    }
+    .card {
+      pointer-events:none;
+      padding: 18px 18px;
+      border-radius: 16px;
+      background: rgba(8,14,26,0.55);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: rgba(255,255,255,0.95);
+      text-shadow: 0 2px 16px rgba(0,0,0,0.6);
+      backdrop-filter: blur(10px);
+      max-width: min(520px, calc(100vw - 30px));
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+    .card h1 { font-size: 18px; margin:0 0 6px; }
+    .card p { margin: 6px 0; opacity: 0.92; }
+    .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      padding: 1px 6px; border-radius: 8px; background: rgba(255,255,255,0.10);
+      border: 1px solid rgba(255,255,255,0.16); }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <div class="hud" id="hud">
+    <div class="row">
+      <div class="pill" id="scorePill">Score: 0</div>
+      <div class="pill" id="distPill">Distance: 0 m</div>
+      <div class="pill" id="speedPill">Speed: 0.0</div>
+      <div class="pill" id="bestPill">Best: 0</div>
+    </div>
+    <div class="hint">
+      Move: <span class="kbd">A</span>/<span class="kbd">D</span> or <span class="kbd">←</span>/<span class="kbd">→</span> ·
+      Stride: <span class="kbd">W</span>/<span class="kbd">↑</span>/<span class="kbd">Space</span> ·
+      Brake: <span class="kbd">S</span>/<span class="kbd">↓</span>
+    </div>
+  </div>
+
+  <div class="center" id="overlay" style="display:none;">
+    <div class="card" id="overlayCard">
+      <h1>Ouch — you tangled your skis!</h1>
+      <p id="overlayText">Press <span class="kbd">R</span> to restart.</p>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // ===== Canvas setup =====
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+
+  function resize() {
+    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    canvas.width = Math.floor(innerWidth * dpr);
+    canvas.height = Math.floor(innerHeight * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  addEventListener('resize', resize);
+  resize();
+
+  // ===== HUD =====
+  const scorePill = document.getElementById('scorePill');
+  const distPill  = document.getElementById('distPill');
+  const speedPill = document.getElementById('speedPill');
+  const bestPill  = document.getElementById('bestPill');
+  const overlay   = document.getElementById('overlay');
+  const overlayText = document.getElementById('overlayText');
+
+  const STORAGE_KEY = "lappish_xc_best_v1";
+  let best = Number(localStorage.getItem(STORAGE_KEY) || 0);
+  bestPill.textContent = `Best: ${best}`;
+
+  // ===== Input =====
+  const keys = new Set();
+  addEventListener('keydown', (e) => {
+    keys.add(e.code);
+    if (["Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.code)) e.preventDefault();
+  }, { passive:false });
+  addEventListener('keyup', (e) => keys.delete(e.code));
+
+  const pressed = (code) => keys.has(code);
+
+  // ===== Game tuning =====
+  const TRACK_TOP_MARGIN = 120;
+  const TRACK_BOTTOM_MARGIN = 110;
+
+  const skier = {
+    x: 170,
+    y: 0,
+    vy: 0,
+    radius: 18,
+    lean: 0,       // visual tilt
+    stamina: 1.0,  // 0..1
+  };
+
+  const world = {
+    t: 0,
+    speed: 3.2,
+    targetSpeed: 3.2,
+    distance: 0, // meters-ish
+    score: 0,
+    alive: true,
+    shake: 0,
+    auroraPhase: 0,
+  };
+
+  // ===== Utility =====
+  const rand = (a,b)=>a+Math.random()*(b-a);
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const lerp=(a,b,t)=>a+(b-a)*t;
+
+  function circleHit(ax,ay,ar,bx,by,br){
+    const dx=ax-bx, dy=ay-by;
+    return dx*dx+dy*dy <= (ar+br)*(ar+br);
+  }
+
+  // ===== Entities =====
+  const obstacles = []; // trees, rocks, reindeer
+  const pickups   = []; // berries
+  const snowPuffs = []; // particles
+
+  function spawnTree() {
+    const laneY = rand(TRACK_TOP_MARGIN+20, innerHeight-TRACK_BOTTOM_MARGIN-20);
+    obstacles.push({
+      type: "tree",
+      x: innerWidth + rand(40, 200),
+      y: laneY,
+      r: rand(20, 34),
+      wobble: rand(0, Math.PI*2),
+    });
+  }
+
+  function spawnRock() {
+    const laneY = rand(TRACK_TOP_MARGIN+30, innerHeight-TRACK_BOTTOM_MARGIN-30);
+    obstacles.push({
+      type: "rock",
+      x: innerWidth + rand(40, 220),
+      y: laneY,
+      r: rand(16, 26),
+      wobble: rand(0, Math.PI*2),
+    });
+  }
+
+  function spawnReindeer() {
+    // Reindeer crosses slowly — small window to slip by.
+    const laneY = rand(TRACK_TOP_MARGIN+40, innerHeight-TRACK_BOTTOM_MARGIN-40);
+    obstacles.push({
+      type: "reindeer",
+      x: innerWidth + rand(80, 280),
+      y: laneY,
+      r: 24,
+      vx: -rand(0.4, 1.1),
+      phase: rand(0, Math.PI*2),
+    });
+  }
+
+  function spawnBerries() {
+    const laneY = rand(TRACK_TOP_MARGIN+30, innerHeight-TRACK_BOTTOM_MARGIN-30);
+    pickups.push({
+      type: "berries",
+      x: innerWidth + rand(80, 240),
+      y: laneY,
+      r: 14,
+      tw: rand(0, Math.PI*2),
+      value: 25,
+    });
+  }
+
+  // ===== Background: fells, aurora, stars =====
+  const stars = Array.from({length: 140}, () => ({
+    x: Math.random(),
+    y: Math.random(),
+    s: rand(0.6, 1.8),
+    a: rand(0.2, 0.9),
+    tw: rand(0, Math.PI*2),
+  }));
+
+  const fellLayers = [
+    { par: 0.10, baseY: 0.55, amp: 0.06, rough: 0.7, colorA: "#0b1b2f", colorB:"#0a1627" },
+    { par: 0.18, baseY: 0.62, amp: 0.08, rough: 0.9, colorA: "#0d223b", colorB:"#0b1c33" },
+    { par: 0.28, baseY: 0.72, amp: 0.10, rough: 1.1, colorA: "#103053", colorB:"#0d2744" },
+  ];
+
+  function noise1d(x){
+    // cheap pseudo noise
+    return Math.sin(x*0.9) * 0.55 + Math.sin(x*2.1) * 0.25 + Math.sin(x*4.2) * 0.12;
+  }
+
+  function drawSky() {
+    const w = innerWidth, h = innerHeight;
+    // gradient night sky
+    const g = ctx.createLinearGradient(0,0,0,h);
+    g.addColorStop(0, "#07111f");
+    g.addColorStop(0.45, "#081a2b");
+    g.addColorStop(1, "#0b2740");
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,w,h);
+
+    // stars
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    for (const st of stars) {
+      const tw = 0.5 + 0.5*Math.sin(world.t*0.8 + st.tw);
+      ctx.globalAlpha = st.a * (0.6 + 0.4*tw);
+      ctx.fillStyle = "#dff3ff";
+      const sx = st.x*w;
+      const sy = st.y*h*0.55;
+      ctx.beginPath();
+      ctx.arc(sx, sy, st.s, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // aurora ribbons
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    ctx.globalAlpha = 0.65;
+    const base = 90 + 18*Math.sin(world.t*0.35);
+    for (let band=0; band<3; band++) {
+      ctx.beginPath();
+      const y0 = base + band*26 + 12*Math.sin(world.t*0.7 + band);
+      for (let x=0; x<=w; x+=12) {
+        const t = x/w;
+        const wave = 22*Math.sin(world.t*0.65 + t*7.0 + band*1.7) +
+                     10*Math.sin(world.t*1.1 + t*15.0);
+        const y = y0 + wave;
+        if (x===0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      const grad = ctx.createLinearGradient(0, y0-40, 0, y0+60);
+      grad.addColorStop(0, "rgba(80,255,200,0)");
+      grad.addColorStop(0.35, band===1 ? "rgba(110,255,210,0.45)" : "rgba(90,240,210,0.35)");
+      grad.addColorStop(0.7, "rgba(120,140,255,0.22)");
+      grad.addColorStop(1, "rgba(80,255,200,0)");
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 34 - band*6;
+      ctx.lineCap = "round";
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawFells() {
+    const w = innerWidth, h = innerHeight;
+
+    for (const L of fellLayers) {
+      const horizonY = h * L.baseY;
+      const amp = h * L.amp;
+      const parX = (world.distance * 0.6) * L.par;
+
+      // filled shape
+      ctx.beginPath();
+      ctx.moveTo(0, h);
+      for (let x=0; x<=w; x+=14) {
+        const nx = (x*0.003) + parX*0.01;
+        const n = noise1d(nx*L.rough);
+        const y = horizonY + n*amp;
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(w, h);
+      ctx.closePath();
+
+      const g = ctx.createLinearGradient(0, horizonY-amp, 0, h);
+      g.addColorStop(0, L.colorA);
+      g.addColorStop(1, L.colorB);
+      ctx.fillStyle = g;
+      ctx.fill();
+    }
+  }
+
+  function drawGroundAndTrack() {
+    const w = innerWidth, h = innerHeight;
+    // snow gradient
+    const g = ctx.createLinearGradient(0, h*0.55, 0, h);
+    g.addColorStop(0, "#d9eef9");
+    g.addColorStop(1, "#b8d7ea");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, h*0.55, w, h*0.45);
+
+    // track (two grooves)
+    const top = TRACK_TOP_MARGIN;
+    const bot = h - TRACK_BOTTOM_MARGIN;
+    const trackH = bot - top;
+
+    // subtle fog
+    ctx.save();
+    ctx.globalAlpha = 0.08;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, top, w, trackH);
+    ctx.restore();
+
+    const centerY = top + trackH*0.62;
+    const laneW = 14;
+    const grooveSep = 16;
+
+    // track shading
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+    for (let i=0; i<2; i++) {
+      const y = centerY + (i===0 ? -grooveSep/2 : grooveSep/2);
+      ctx.fillStyle = "rgba(80,120,150,0.18)";
+      ctx.fillRect(0, y-2.5, w, 5);
+      ctx.fillStyle = "rgba(255,255,255,0.30)";
+      ctx.fillRect(0, y-1, w, 2);
+    }
+    ctx.restore();
+
+    // scrolling snow texture lines
+    ctx.save();
+    ctx.globalAlpha = 0.12;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1;
+    const scroll = (world.distance*8) % 60;
+    for (let y=top; y<bot; y+=18) {
+      ctx.beginPath();
+      for (let x=0; x<=w; x+=60) {
+        const xx = x - scroll;
+        const wig = 2*Math.sin((y*0.08) + (world.t*0.9));
+        ctx.moveTo(xx, y+wig);
+        ctx.lineTo(xx+26, y+wig+0.5);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // ===== Draw obstacles/pickups =====
+  function drawTree(o) {
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    const sway = 0.06*Math.sin(world.t*1.5 + o.wobble);
+    ctx.rotate(sway);
+
+    // trunk
+    ctx.fillStyle = "#4a2d1b";
+    ctx.fillRect(-4, o.r*0.4, 8, o.r*0.9);
+
+    // layers
+    for (let i=0; i<3; i++) {
+      const y = -o.r*0.35 + i*(o.r*0.33);
+      const w = o.r*1.4 - i*o.r*0.22;
+      const h = o.r*0.6;
+      ctx.beginPath();
+      ctx.moveTo(0, y - h*0.85);
+      ctx.lineTo(-w*0.6, y + h*0.4);
+      ctx.lineTo(w*0.6, y + h*0.4);
+      ctx.closePath();
+      ctx.fillStyle = i===0 ? "#1c5a3b" : (i===1 ? "#1a5236" : "#164a31");
+      ctx.fill();
+    }
+
+    // snow caps
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.beginPath();
+    ctx.arc(0, -o.r*0.52, o.r*0.22, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawRock(o) {
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    const bob = 1.2*Math.sin(world.t*2 + o.wobble);
+    ctx.translate(0, bob);
+    ctx.fillStyle = "#5e6b75";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, o.r*1.1, o.r*0.75, 0.2, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.7)";
+    ctx.beginPath();
+    ctx.ellipse(-o.r*0.25, -o.r*0.18, o.r*0.35, o.r*0.18, -0.3, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawReindeer(o) {
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    const step = 1.6*Math.sin(world.t*6 + o.phase);
+    // body
+    ctx.fillStyle = "#6b4a2b";
+    ctx.beginPath();
+    ctx.ellipse(0, -8, 22, 12, 0, 0, Math.PI*2);
+    ctx.fill();
+    // head
+    ctx.beginPath();
+    ctx.ellipse(22, -14, 10, 8, 0.2, 0, Math.PI*2);
+    ctx.fill();
+    // legs
+    ctx.strokeStyle = "#3e2a18";
+    ctx.lineWidth = 3;
+    for (let i=0;i<4;i++){
+      const lx = -14 + i*10;
+      ctx.beginPath();
+      ctx.moveTo(lx, 2);
+      ctx.lineTo(lx + (i%2===0? step: -step)*0.5, 18);
+      ctx.stroke();
+    }
+    // antlers
+    ctx.strokeStyle = "#3f2a16";
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(28, -24);
+    ctx.lineTo(34, -34);
+    ctx.lineTo(38, -30);
+    ctx.moveTo(34, -34);
+    ctx.lineTo(30, -38);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawBerries(p) {
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    const pulse = 0.9 + 0.12*Math.sin(world.t*4 + p.tw);
+    ctx.scale(pulse, pulse);
+    // leaves
+    ctx.fillStyle = "#1c6a43";
+    ctx.beginPath();
+    ctx.ellipse(-6, -10, 8, 4, -0.6, 0, Math.PI*2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(6, -10, 8, 4, 0.6, 0, Math.PI*2);
+    ctx.fill();
+    // berries cluster
+    const reds = ["#e53b4f","#d92c44","#ff5a6c"];
+    for (let i=0;i<6;i++){
+      const a = i*(Math.PI*2/6);
+      const bx = 10*Math.cos(a)*0.55;
+      const by = 10*Math.sin(a)*0.45 + 2;
+      ctx.fillStyle = reds[i%reds.length];
+      ctx.beginPath();
+      ctx.arc(bx, by, 4.2, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.fillStyle = "rgba(255,255,255,0.8)";
+    ctx.beginPath();
+    ctx.arc(-2, 2, 2, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ===== Skier drawing =====
+  function drawSkier() {
+    const x = skier.x, y = skier.y;
+    ctx.save();
+    ctx.translate(x, y);
+
+    // shadow on snow
+    ctx.save();
+    ctx.globalAlpha = 0.15;
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    ctx.ellipse(0, 18, 26, 10, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+
+    // lean
+    ctx.rotate(skier.lean);
+
+    // skis
+    ctx.strokeStyle = "rgba(40,60,80,0.9)";
+    ctx.lineWidth = 5;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(-22, 18);
+    ctx.lineTo(26, 12);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-18, 22);
+    ctx.lineTo(30, 16);
+    ctx.stroke();
+
+    // body
+    ctx.fillStyle = "#c41f3c"; // red jacket pops in snow
+    ctx.beginPath();
+    ctx.roundRect(-10, -22, 20, 28, 10);
+    ctx.fill();
+
+    // head
+    ctx.fillStyle = "#ffd9bf";
+    ctx.beginPath();
+    ctx.arc(0, -28, 10, 0, Math.PI*2);
+    ctx.fill();
+
+    // hat
+    ctx.fillStyle = "#1b355a";
+    ctx.beginPath();
+    ctx.arc(0, -32, 11, Math.PI, Math.PI*2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillRect(-11, -33, 22, 6);
+
+    // poles
+    ctx.strokeStyle = "rgba(70,90,110,0.95)";
+    ctx.lineWidth = 3;
+    const poleSwing = 0.9*Math.sin(world.t*9) * (0.6 + 0.4*world.speed/6);
+    ctx.beginPath();
+    ctx.moveTo(-6, -6);
+    ctx.lineTo(-18 - poleSwing*6, 20);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(6, -6);
+    ctx.lineTo(18 + poleSwing*6, 20);
+    ctx.stroke();
+
+    // scarf flutter
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = "#f2c14e";
+    ctx.beginPath();
+    ctx.moveTo(6, -16);
+    ctx.quadraticCurveTo(26, -10 + poleSwing*6, 34, -2 + poleSwing*5);
+    ctx.quadraticCurveTo(22, -4 + poleSwing*2, 10, -8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  // Polyfill for roundRect for older browsers
+  if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x,y,w,h,r){
+      r = Math.min(r, w/2, h/2);
+      this.beginPath();
+      this.moveTo(x+r, y);
+      this.arcTo(x+w, y, x+w, y+h, r);
+      this.arcTo(x+w, y+h, x, y+h, r);
+      this.arcTo(x, y+h, x, y, r);
+      this.arcTo(x, y, x+w, y, r);
+      this.closePath();
+      return this;
+    };
+  }
+
+  // ===== Snow particles =====
+  function puff(x,y, n=8) {
+    for (let i=0;i<n;i++){
+      snowPuffs.push({
+        x, y,
+        vx: rand(-1.6, -0.2),
+        vy: rand(-1.1, 1.1),
+        r: rand(1.2, 3.2),
+        a: rand(0.25, 0.55),
+        life: rand(18, 32)
+      });
+    }
+  }
+
+  // ===== Game loop =====
+  let last = performance.now();
+  function step(now) {
+    const dt = Math.min(0.033, (now - last)/1000);
+    last = now;
+
+    update(dt);
+    render();
+
+    requestAnimationFrame(step);
+  }
+
+  function reset() {
+    obstacles.length = 0;
+    pickups.length = 0;
+    snowPuffs.length = 0;
+
+    world.t = 0;
+    world.speed = 3.2;
+    world.targetSpeed = 3.2;
+    world.distance = 0;
+    world.score = 0;
+    world.alive = true;
+    world.shake = 0;
+
+    skier.y = innerHeight*0.70;
+    skier.vy = 0;
+    skier.lean = 0;
+    skier.stamina = 1.0;
+
+    overlay.style.display = "none";
+  }
+
+  // Start position
+  reset();
+
+  // Spawners
+  let spawnTimer = 0;
+  let berryTimer = 0;
+
+  function update(dt) {
+    world.t += dt;
+    if (!world.alive) {
+      // allow restart
+      if (pressed("KeyR")) reset();
+      // slow shake decay
+      world.shake = Math.max(0, world.shake - dt*2.5);
+      return;
+    }
+
+    // Inputs
+    const up = pressed("KeyA") || pressed("ArrowLeft");
+    const down = pressed("KeyD") || pressed("ArrowRight");
+    const stride = pressed("KeyW") || pressed("ArrowUp") || pressed("Space");
+    const brake = pressed("KeyS") || pressed("ArrowDown");
+
+    // stamina regen
+    skier.stamina = clamp(skier.stamina + dt*0.10, 0, 1);
+
+    // speed control
+    world.targetSpeed = 3.2 + Math.min(4.2, world.distance/900) * 0.55; // gently gets faster
+    if (stride && skier.stamina > 0.08) {
+      world.targetSpeed += 1.6;
+      skier.stamina -= dt*0.32;
+      if (Math.random() < 0.25) puff(skier.x-10, skier.y+18, 4);
+    }
+    if (brake) world.targetSpeed -= 2.0;
+
+    world.targetSpeed = clamp(world.targetSpeed, 1.2, 8.5);
+    world.speed = lerp(world.speed, world.targetSpeed, 1 - Math.pow(0.001, dt)); // smooth
+
+    // vertical motion
+    const accelY = (down? 420:0) + (up? -420:0);
+    skier.vy += accelY * dt;
+    skier.vy *= Math.pow(0.001, dt); // strong damping
+    skier.y += skier.vy * dt;
+
+    const top = TRACK_TOP_MARGIN;
+    const bot = innerHeight - TRACK_BOTTOM_MARGIN;
+    skier.y = clamp(skier.y, top+20, bot-20);
+
+    // lean visual
+    const desiredLean = clamp(skier.vy/650, -0.35, 0.35);
+    skier.lean = lerp(skier.lean, desiredLean, 1 - Math.pow(0.001, dt));
+
+    // distance & score
+    world.distance += world.speed * 26 * dt; // meters-ish
+    world.score += world.speed * 2.2 * dt;   // base score
+
+    // spawn obstacles/pickups
+    spawnTimer -= dt * (0.9 + world.speed/6);
+    berryTimer -= dt * (0.8 + world.speed/8);
+
+    if (spawnTimer <= 0) {
+      spawnTimer = rand(0.38, 0.72);
+      const roll = Math.random();
+      if (roll < 0.52) spawnTree();
+      else if (roll < 0.86) spawnRock();
+      else spawnReindeer();
+    }
+
+    if (berryTimer <= 0) {
+      berryTimer = rand(0.7, 1.4);
+      if (Math.random() < 0.75) spawnBerries();
+    }
+
+    // move obstacles/pickups left based on speed
+    const scrollX = world.speed * 220 * dt;
+    for (const o of obstacles) {
+      o.x -= scrollX;
+      if (o.type === "reindeer") o.x += o.vx; // it walks too
+      if (o.type === "reindeer") o.y += 0.22*Math.sin(world.t*3 + o.phase);
+    }
+    for (const p of pickups) p.x -= scrollX;
+
+    // cull offscreen
+    for (let i=obstacles.length-1;i>=0;i--){
+      if (obstacles[i].x < -120) obstacles.splice(i,1);
+    }
+    for (let i=pickups.length-1;i>=0;i--){
+      if (pickups[i].x < -120) pickups.splice(i,1);
+    }
+
+    // particle update
+    for (let i=snowPuffs.length-1;i>=0;i--){
+      const s = snowPuffs[i];
+      s.x += s.vx * (60*dt);
+      s.y += s.vy * (60*dt);
+      s.life -= 60*dt;
+      s.a *= Math.pow(0.88, 60*dt);
+      if (s.life <= 0 || s.a < 0.02) snowPuffs.splice(i,1);
+    }
+
+    // collisions
+    for (const o of obstacles) {
+      const r = (o.type==="tree") ? o.r*0.62 : (o.type==="rock" ? o.r*0.85 : o.r*0.90);
+      if (circleHit(skier.x, skier.y, skier.radius, o.x, o.y, r)) {
+        crash(o.type);
+        break;
+      }
+    }
+
+    for (let i=pickups.length-1;i>=0;i--){
+      const p = pickups[i];
+      if (circleHit(skier.x, skier.y, skier.radius, p.x, p.y, p.r)) {
+        world.score += p.value;
+        puff(p.x, p.y, 10);
+        pickups.splice(i,1);
+      }
+    }
+
+    // update HUD
+    scorePill.textContent = `Score: ${Math.floor(world.score)}`;
+    distPill.textContent = `Distance: ${Math.floor(world.distance)} m`;
+    speedPill.textContent = `Speed: ${world.speed.toFixed(1)}`;
+  }
+
+  function crash(type) {
+    world.alive = false;
+    world.shake = 1.0;
+    puff(skier.x, skier.y, 26);
+
+    const why =
+      type==="tree" ? "You clipped a snowy spruce." :
+      type==="rock" ? "You caught an edge on a hidden rock." :
+      "A reindeer wandered into your track.";
+
+    overlayText.innerHTML =
+      `${why}<br><br>Final score: <b>${Math.floor(world.score)}</b> · Distance: <b>${Math.floor(world.distance)} m</b><br>
+       Press <span class="kbd">R</span> to restart.`;
+
+    overlay.style.display = "flex";
+
+    // best
+    const finalScore = Math.floor(world.score);
+    if (finalScore > best) {
+      best = finalScore;
+      localStorage.setItem(STORAGE_KEY, String(best));
+      bestPill.textContent = `Best: ${best}`;
+    }
+  }
+
+  function render() {
+    const w = innerWidth, h = innerHeight;
+
+    // screen shake
+    let shakeX = 0, shakeY = 0;
+    if (world.shake > 0) {
+      shakeX = (Math.random()-0.5) * 10 * world.shake;
+      shakeY = (Math.random()-0.5) * 10 * world.shake;
+      world.shake = Math.max(0, world.shake - 0.03);
+    }
+
+    ctx.save();
+    ctx.translate(shakeX, shakeY);
+
+    drawSky();
+    drawFells();
+    drawGroundAndTrack();
+
+    // distant trees parallax silhouettes at horizon
+    drawHorizonSpruceBelt();
+
+    // draw pickups behind obstacles for readability
+    for (const p of pickups) drawBerries(p);
+
+    // draw obstacles
+    for (const o of obstacles) {
+      if (o.type === "tree") drawTree(o);
+      else if (o.type === "rock") drawRock(o);
+      else drawReindeer(o);
+    }
+
+    // particles
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    for (const s of snowPuffs) {
+      ctx.globalAlpha = s.a;
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // skier last (on top)
+    drawSkier();
+
+    // vignette
+    ctx.save();
+    const vg = ctx.createRadialGradient(w*0.5, h*0.65, Math.min(w,h)*0.25, w*0.5, h*0.65, Math.max(w,h)*0.72);
+    vg.addColorStop(0, "rgba(0,0,0,0)");
+    vg.addColorStop(1, "rgba(0,0,0,0.45)");
+    ctx.fillStyle = vg;
+    ctx.fillRect(0,0,w,h);
+    ctx.restore();
+
+    // stamina meter
+    drawStaminaBar();
+
+    ctx.restore();
+  }
+
+  function drawHorizonSpruceBelt() {
+    const w = innerWidth, h = innerHeight;
+    const y = h*0.56;
+    const par = (world.distance*0.8) % 120;
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = "#0b2a2e";
+    for (let x=-140; x<w+140; x+=60) {
+      const xx = x - par;
+      const ht = 26 + 12*Math.sin((x*0.08) + world.t*0.6);
+      ctx.beginPath();
+      ctx.moveTo(xx, y);
+      ctx.lineTo(xx+18, y-ht);
+      ctx.lineTo(xx+36, y);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawStaminaBar() {
+    const w = innerWidth, h = innerHeight;
+    const x = 12, y = h - 34;
+    const bw = 180, bh = 14;
+
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = "rgba(255,255,255,0.10)";
+    ctx.strokeStyle = "rgba(255,255,255,0.16)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(x, y, bw, bh, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    // fill (no hard-coded color? It's UI; keeping subtle icy)
+    const fillW = Math.max(0, (bw-4) * skier.stamina);
+    const g = ctx.createLinearGradient(x,0,x+bw,0);
+    g.addColorStop(0, "rgba(110,255,210,0.65)");
+    g.addColorStop(1, "rgba(120,140,255,0.55)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.roundRect(x+2, y+2, fillW, bh-4, 6);
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+    ctx.fillText("Stamina", x + bw + 10, y + 12);
+
+    ctx.restore();
+  }
+
+  requestAnimationFrame(step);
+})();
+</script>
+</body>
+</html>
