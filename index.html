@@ -25,6 +25,30 @@
       font-size: 14px;
     }
     .hint { opacity:0.9; font-size: 13px; margin-top: 8px; }
+    .help-btn {
+      color: rgba(255,255,255,0.95);
+      cursor: pointer;
+      font: inherit;
+    }
+    .help-panel {
+      margin-top: 10px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: rgba(8,14,26,0.55);
+      border: 1px solid rgba(255,255,255,0.12);
+      backdrop-filter: blur(8px);
+      max-width: min(560px, calc(100vw - 24px));
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .help-panel h2 {
+      margin: 0 0 6px;
+      font-size: 15px;
+    }
+    .help-panel p {
+      margin: 6px 0;
+      opacity: 0.95;
+    }
     .center {
       position: fixed; inset:0; display:flex; align-items:center; justify-content:center;
       pointer-events:none;
@@ -57,11 +81,19 @@
       <div class="pill" id="distPill">Distance: 0 m</div>
       <div class="pill" id="speedPill">Speed: 0.0</div>
       <div class="pill" id="bestPill">Best: 0</div>
+      <button class="pill help-btn" id="helpBtn" type="button">How to play</button>
     </div>
     <div class="hint">
       Move: <span class="kbd">A</span>/<span class="kbd">D</span> or <span class="kbd">←</span>/<span class="kbd">→</span> ·
-      Stride: <span class="kbd">W</span>/<span class="kbd">↑</span>/<span class="kbd">Space</span> ·
+      Go fast: <span class="kbd">W</span>/<span class="kbd">↑</span>/<span class="kbd">Space</span> ·
       Brake: <span class="kbd">S</span>/<span class="kbd">↓</span>
+    </div>
+    <div class="help-panel" id="helpPanel" style="display:none;">
+      <h2>How to play</h2>
+      <p>Goal: stay alive as long as possible, avoid obstacles, and run up your score.</p>
+      <p>Scoring: you always gain score while moving, and faster speed gives proportionally more score for the same distance.</p>
+      <p>Use go-fast to boost scoring pace, brake when needed to avoid crashes, and collect berries for bonus points.</p>
+      <p>Tip: press <span class="kbd">H</span> to toggle this panel, <span class="kbd">Esc</span> to close it.</p>
     </div>
   </div>
 
@@ -92,6 +124,8 @@
   const distPill  = document.getElementById('distPill');
   const speedPill = document.getElementById('speedPill');
   const bestPill  = document.getElementById('bestPill');
+  const helpBtn   = document.getElementById('helpBtn');
+  const helpPanel = document.getElementById('helpPanel');
   const overlay   = document.getElementById('overlay');
   const overlayText = document.getElementById('overlayText');
 
@@ -99,13 +133,27 @@
   let best = Number(localStorage.getItem(STORAGE_KEY) || 0);
   bestPill.textContent = `Best: ${best}`;
 
+  function setHelpOpen(open) {
+    helpPanel.style.display = open ? "block" : "none";
+  }
+
   // ===== Input =====
   const keys = new Set();
   addEventListener('keydown', (e) => {
+    if (e.code === "KeyH") {
+      setHelpOpen(helpPanel.style.display === "none");
+      return;
+    }
+    if (e.code === "Escape") {
+      setHelpOpen(false);
+    }
     keys.add(e.code);
     if (["Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.code)) e.preventDefault();
   }, { passive:false });
   addEventListener('keyup', (e) => keys.delete(e.code));
+  helpBtn.addEventListener('click', () => {
+    setHelpOpen(helpPanel.style.display === "none");
+  });
 
   const pressed = (code) => keys.has(code);
 
