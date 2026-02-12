@@ -81,12 +81,13 @@
       <div class="pill" id="distPill">Distance: 0 m</div>
       <div class="pill" id="speedPill">Speed: 0.0</div>
       <div class="pill" id="bestPill">Best: 0</div>
+      <div class="pill" id="audioPill">Audio: Off</div>
       <button class="pill help-btn" id="helpBtn" type="button">How to play</button>
     </div>
     <div class="hint">
       Move: <span class="kbd">A</span>/<span class="kbd">D</span> or <span class="kbd">←</span>/<span class="kbd">→</span> ·
       Go fast: <span class="kbd">W</span>/<span class="kbd">↑</span>/<span class="kbd">Space</span> ·
-      Brake: <span class="kbd">S</span>/<span class="kbd">↓</span>
+      Brake: <span class="kbd">S</span>/<span class="kbd">↓</span> · Mute: <span class="kbd">M</span>
     </div>
     <div class="help-panel" id="helpPanel" style="display:none;">
       <h2>How to play</h2>
@@ -124,6 +125,7 @@
   const distPill  = document.getElementById('distPill');
   const speedPill = document.getElementById('speedPill');
   const bestPill  = document.getElementById('bestPill');
+  const audioPill = document.getElementById('audioPill');
   const helpBtn   = document.getElementById('helpBtn');
   const helpPanel = document.getElementById('helpPanel');
   const overlay   = document.getElementById('overlay');
@@ -140,6 +142,11 @@
   // ===== Input =====
   const keys = new Set();
   addEventListener('keydown', (e) => {
+    audio.ensureStarted();
+    if (e.code === "KeyM") {
+      audio.toggleMute();
+      return;
+    }
     if (e.code === "KeyH") {
       setHelpOpen(helpPanel.style.display === "none");
       return;
@@ -152,8 +159,10 @@
   }, { passive:false });
   addEventListener('keyup', (e) => keys.delete(e.code));
   helpBtn.addEventListener('click', () => {
+    audio.ensureStarted();
     setHelpOpen(helpPanel.style.display === "none");
   });
+  canvas.addEventListener('pointerdown', () => audio.ensureStarted());
 
   const pressed = (code) => keys.has(code);
 
@@ -202,6 +211,289 @@
     const dx=ax-bx, dy=ay-by;
     return dx*dx+dy*dy <= (ar+br)*(ar+br);
   }
+
+  // ===== Audio =====
+  function createAudioEngine({ onStatus }) {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) {
+      onStatus("Audio: Unsupported");
+      return {
+        ensureStarted() {},
+        tickFromGame() {},
+        onPickup() {},
+        onCrash() {},
+        onReset() {},
+        toggleMute() {},
+      };
+    }
+
+    let ctx = null;
+    let master = null;
+    let toneFilter = null;
+    let delaySend = null;
+    let bassOsc = null;
+    let bassGain = null;
+    let windGain = null;
+    let windFilter = null;
+    let started = false;
+    let muted = false;
+    let nextNoteTime = 0;
+    let rootMidi = 50; // D3
+    let tempo = 66;
+    let targetCutoff = 1200;
+    let smoothCutoff = 1200;
+    const mode = [0, 2, 3, 5, 7, 9, 10]; // Dorian feel
+
+    const midiToHz = (m) => 440 * Math.pow(2, (m - 69) / 12);
+
+    function init() {
+      if (ctx) return;
+      ctx = new AudioCtx();
+
+      master = ctx.createGain();
+      master.gain.value = 0.0;
+
+      toneFilter = ctx.createBiquadFilter();
+      toneFilter.type = "lowpass";
+      toneFilter.frequency.value = 1200;
+      toneFilter.Q.value = 0.4;
+
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -20;
+      comp.knee.value = 18;
+      comp.ratio.value = 3.2;
+      comp.attack.value = 0.01;
+      comp.release.value = 0.28;
+
+      delaySend = ctx.createGain();
+      delaySend.gain.value = 0.0;
+
+      const delay = ctx.createDelay(1.5);
+      delay.delayTime.value = 0.42;
+      const feedback = ctx.createGain();
+      feedback.gain.value = 0.24;
+      const delayTone = ctx.createBiquadFilter();
+      delayTone.type = "lowpass";
+      delayTone.frequency.value = 2400;
+      const delayWet = ctx.createGain();
+      delayWet.gain.value = 0.2;
+
+      delaySend.connect(delay);
+      delay.connect(delayTone);
+      delayTone.connect(feedback);
+      feedback.connect(delay);
+      delayTone.connect(delayWet);
+      delayWet.connect(master);
+
+      master.connect(toneFilter);
+      toneFilter.connect(comp);
+      comp.connect(ctx.destination);
+
+      // Continuous low bass drone
+      bassOsc = ctx.createOscillator();
+      bassOsc.type = "triangle";
+      bassOsc.frequency.value = midiToHz(rootMidi - 12);
+      bassGain = ctx.createGain();
+      bassGain.gain.value = 0.0;
+      bassOsc.connect(bassGain);
+      bassGain.connect(master);
+      bassGain.connect(delaySend);
+      bassOsc.start();
+
+      // Wind bed
+      const noiseBuffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+      const ch = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * 0.55;
+      const noise = ctx.createBufferSource();
+      noise.buffer = noiseBuffer;
+      noise.loop = true;
+      windFilter = ctx.createBiquadFilter();
+      windFilter.type = "bandpass";
+      windFilter.frequency.value = 520;
+      windFilter.Q.value = 0.4;
+      windGain = ctx.createGain();
+      windGain.gain.value = 0.0;
+      noise.connect(windFilter);
+      windFilter.connect(windGain);
+      windGain.connect(master);
+      noise.start();
+
+      nextNoteTime = ctx.currentTime + 0.12;
+    }
+
+    function playPadNote(time, midi, seconds, level, send = 0.35) {
+      const vca = ctx.createGain();
+      vca.gain.setValueAtTime(0.0001, time);
+      vca.gain.linearRampToValueAtTime(level, time + 1.1);
+      vca.gain.linearRampToValueAtTime(0.0001, time + seconds);
+
+      const vcf = ctx.createBiquadFilter();
+      vcf.type = "lowpass";
+      vcf.frequency.setValueAtTime(700, time);
+      vcf.frequency.linearRampToValueAtTime(1500 + Math.random() * 700, time + Math.min(2.4, seconds * 0.6));
+      vcf.Q.value = 0.35;
+
+      const a = ctx.createOscillator();
+      a.type = "sawtooth";
+      a.frequency.setValueAtTime(midiToHz(midi), time);
+      a.detune.value = -4;
+      const b = ctx.createOscillator();
+      b.type = "triangle";
+      b.frequency.setValueAtTime(midiToHz(midi + (Math.random() < 0.2 ? 12 : 0)), time);
+      b.detune.value = 5;
+
+      a.connect(vcf);
+      b.connect(vcf);
+      vcf.connect(vca);
+      vca.connect(master);
+
+      const sendGain = ctx.createGain();
+      sendGain.gain.value = send;
+      vca.connect(sendGain);
+      sendGain.connect(delaySend);
+
+      a.start(time);
+      b.start(time);
+      a.stop(time + seconds + 0.2);
+      b.stop(time + seconds + 0.2);
+    }
+
+    function playBell(time, midi, level = 0.11) {
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, time);
+      gain.gain.exponentialRampToValueAtTime(level, time + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.48);
+
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(midiToHz(midi), time);
+      osc.frequency.exponentialRampToValueAtTime(midiToHz(midi) * 0.98, time + 0.2);
+
+      const shimmer = ctx.createOscillator();
+      shimmer.type = "triangle";
+      shimmer.frequency.setValueAtTime(midiToHz(midi + 12), time);
+      const shimmerGain = ctx.createGain();
+      shimmerGain.gain.value = level * 0.35;
+
+      osc.connect(gain);
+      shimmer.connect(shimmerGain);
+      shimmerGain.connect(gain);
+      gain.connect(master);
+      gain.connect(delaySend);
+      osc.start(time);
+      shimmer.start(time);
+      osc.stop(time + 0.52);
+      shimmer.stop(time + 0.52);
+    }
+
+    function playCrash() {
+      const t = ctx.currentTime;
+      const buffer = ctx.createBuffer(1, ctx.sampleRate * 0.35, ctx.sampleRate);
+      const ch = buffer.getChannelData(0);
+      for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * (1 - i / ch.length);
+
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      const hp = ctx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.setValueAtTime(260, t);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.24, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+
+      const drop = ctx.createOscillator();
+      drop.type = "sine";
+      drop.frequency.setValueAtTime(110, t);
+      drop.frequency.exponentialRampToValueAtTime(42, t + 0.22);
+      const dropGain = ctx.createGain();
+      dropGain.gain.setValueAtTime(0.12, t);
+      dropGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.24);
+
+      src.connect(hp);
+      hp.connect(g);
+      g.connect(master);
+      drop.connect(dropGain);
+      dropGain.connect(master);
+
+      src.start(t);
+      drop.start(t);
+      src.stop(t + 0.33);
+      drop.stop(t + 0.25);
+    }
+
+    function scheduleAmbient(distance) {
+      const step = Math.random() < 0.65 ? 2 : (Math.random() < 0.7 ? 3 : 1);
+      const beat = 60 / tempo;
+      const holdBeats = 2 + (Math.random() < 0.55 ? 1 : 0) + (Math.random() < 0.25 ? 1 : 0);
+      const octave = Math.random() < 0.2 ? 12 : 0;
+      const deg = mode[Math.floor(Math.random() * mode.length)];
+      const midi = rootMidi + deg + octave;
+      playPadNote(nextNoteTime, midi, holdBeats * beat + 0.8, 0.038 + Math.random() * 0.02);
+      if (Math.random() < 0.28) playBell(nextNoteTime + beat * 0.5, rootMidi + mode[(Math.floor(Math.random() * 3) + 2) % mode.length] + 12, 0.05);
+      nextNoteTime += beat * step;
+      rootMidi = (Math.floor(distance / 900) % 2 === 0) ? 50 : 48;
+      bassOsc.frequency.setTargetAtTime(midiToHz(rootMidi - 12), ctx.currentTime, 0.8);
+    }
+
+    function ensureStarted() {
+      init();
+      if (started) return;
+      ctx.resume();
+      started = true;
+      master.gain.setTargetAtTime(muted ? 0.0 : 0.22, ctx.currentTime, 1.6);
+      bassGain.gain.setTargetAtTime(0.08, ctx.currentTime, 2.0);
+      windGain.gain.setTargetAtTime(0.04, ctx.currentTime, 2.4);
+      onStatus(muted ? "Audio: Muted" : "Audio: On");
+    }
+
+    return {
+      ensureStarted() {
+        ensureStarted();
+      },
+      tickFromGame(game) {
+        if (!started) return;
+        const speedNorm = clamp((game.speed - BASE_SPEED) / (MAX_SPEED - BASE_SPEED), 0, 1);
+        tempo = 62 + speedNorm * 22;
+        targetCutoff = game.alive ? (900 + speedNorm * 1800) : 520;
+        smoothCutoff = lerp(smoothCutoff, targetCutoff, 0.05);
+        toneFilter.frequency.setTargetAtTime(smoothCutoff, ctx.currentTime, 0.1);
+        windFilter.frequency.setTargetAtTime(420 + speedNorm * 380, ctx.currentTime, 0.18);
+        delaySend.gain.setTargetAtTime(0.14 + speedNorm * 0.18, ctx.currentTime, 0.28);
+        bassGain.gain.setTargetAtTime(game.alive ? 0.07 : 0.03, ctx.currentTime, 0.7);
+        windGain.gain.setTargetAtTime(game.alive ? (0.03 + speedNorm * 0.04) : 0.015, ctx.currentTime, 0.6);
+
+        while (nextNoteTime < ctx.currentTime + 0.24) {
+          scheduleAmbient(game.distance);
+        }
+      },
+      onPickup() {
+        if (!started) return;
+        playBell(ctx.currentTime + 0.01, rootMidi + 14 + (Math.random() < 0.5 ? 0 : 3), 0.095);
+      },
+      onCrash() {
+        if (!started) return;
+        playCrash();
+      },
+      onReset() {
+        if (!started) return;
+        const t = ctx.currentTime;
+        playBell(t + 0.03, rootMidi + 7, 0.08);
+        master.gain.cancelScheduledValues(t);
+        master.gain.setTargetAtTime(muted ? 0.0 : 0.22, t, 0.8);
+      },
+      toggleMute() {
+        ensureStarted();
+        muted = !muted;
+        master.gain.setTargetAtTime(muted ? 0.0 : 0.22, ctx.currentTime, 0.09);
+        onStatus(muted ? "Audio: Muted" : "Audio: On");
+      },
+    };
+  }
+
+  const audio = createAudioEngine({
+    onStatus: (label) => { audioPill.textContent = label; }
+  });
 
   // ===== Entities =====
   const obstacles = []; // trees, rocks, reindeer
@@ -675,6 +967,7 @@
     skier.lean = 0;
 
     overlay.style.display = "none";
+    audio.onReset();
   }
 
   // Start position
@@ -686,6 +979,7 @@
 
   function update(dt) {
     world.t += dt;
+    audio.tickFromGame(world);
     if (!world.alive) {
       // allow restart
       if (pressed("KeyR")) reset();
@@ -788,6 +1082,7 @@
       if (circleHit(skier.x, skier.y, skier.radius, p.x, p.y, p.r)) {
         world.score += p.value;
         puff(p.x, p.y, 10);
+        audio.onPickup();
         pickups.splice(i,1);
       }
     }
@@ -802,6 +1097,7 @@
     world.alive = false;
     world.shake = 1.0;
     puff(skier.x, skier.y, 26);
+    audio.onCrash();
 
     const why =
       type==="tree" ? "You clipped a snowy spruce." :
