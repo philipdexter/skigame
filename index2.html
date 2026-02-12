@@ -299,6 +299,10 @@
     if (now - touchInput.chillTapAt < 360) location.reload();
     touchInput.chillTapAt = now;
   });
+  // iOS/Safari can miss pointer-based unlocks; keep a direct touch unlock.
+  canvas.addEventListener('touchstart', () => {
+    audio.ensureStarted();
+  }, { passive: true });
 
   steerZone.addEventListener('pointerdown', (e) => {
     e.preventDefault();
@@ -621,8 +625,11 @@
 
     function ensureStarted() {
       init();
+      // Mobile browsers can suspend context when app/tab visibility changes.
+      if (ctx.state !== "running") {
+        ctx.resume();
+      }
       if (started) return;
-      ctx.resume();
       started = true;
       master.gain.setTargetAtTime(muted ? 0.0 : 0.22, ctx.currentTime, 1.6);
       bassGain.gain.setTargetAtTime(0.08, ctx.currentTime, 2.0);
@@ -676,6 +683,9 @@
 
   const audio = createAudioEngine({
     onStatus: (label) => { audioPill.textContent = label; }
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === "visible") audio.ensureStarted();
   });
 
   // ===== Entities =====
