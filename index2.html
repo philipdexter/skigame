@@ -1,0 +1,1508 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Lappish XC Glide</title>
+  <style>
+    html, body { margin:0; height:100%; background:#07111f; overflow:hidden; touch-action:none; }
+    canvas { display:block; width:100vw; height:100vh; image-rendering:auto; touch-action:none; }
+    .hud {
+      position: fixed; left: 12px; top: 12px;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      color: rgba(255,255,255,0.92);
+      text-shadow: 0 2px 12px rgba(0,0,0,0.6);
+      user-select:none;
+      line-height: 1.25;
+      max-width: min(560px, calc(100vw - 24px));
+    }
+    .hud .row { display:flex; gap:14px; flex-wrap:wrap; align-items:baseline; }
+    .pill {
+      padding: 6px 10px; border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.12);
+      backdrop-filter: blur(6px);
+      font-size: 14px;
+    }
+    .hint { opacity:0.9; font-size: 13px; margin-top: 8px; }
+    .nowrap { white-space: nowrap; }
+    .help-btn {
+      color: rgba(255,255,255,0.95);
+      cursor: pointer;
+      font: inherit;
+    }
+    .help-panel {
+      margin-top: 10px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: rgba(8,14,26,0.55);
+      border: 1px solid rgba(255,255,255,0.12);
+      backdrop-filter: blur(8px);
+      max-width: min(560px, calc(100vw - 24px));
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .help-panel h2 {
+      margin: 0 0 6px;
+      font-size: 15px;
+    }
+    .help-panel p {
+      margin: 6px 0;
+      opacity: 0.95;
+    }
+    .center {
+      position: fixed; inset:0; display:flex; align-items:center; justify-content:center;
+      pointer-events:none;
+    }
+    .card {
+      pointer-events:none;
+      padding: 18px 18px;
+      border-radius: 16px;
+      background: rgba(8,14,26,0.55);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: rgba(255,255,255,0.95);
+      text-shadow: 0 2px 16px rgba(0,0,0,0.6);
+      backdrop-filter: blur(10px);
+      max-width: min(520px, calc(100vw - 30px));
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+    .card h1 { font-size: 18px; margin:0 0 6px; }
+    .card p { margin: 6px 0; opacity: 0.92; }
+    .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      padding: 1px 6px; border-radius: 8px; background: rgba(255,255,255,0.10);
+      border: 1px solid rgba(255,255,255,0.16); }
+    .touch-controls {
+      position: fixed;
+      inset: auto 0 0 0;
+      pointer-events: none;
+      z-index: 30;
+      padding: 0 12px calc(10px + env(safe-area-inset-bottom, 0px));
+      display: none;
+    }
+    .touch-steer {
+      position: fixed;
+      left: 10px;
+      top: 45vh;
+      bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+      width: min(42vw, 240px);
+      border-radius: 24px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+      border: 1px solid rgba(255,255,255,0.16);
+      backdrop-filter: blur(6px);
+      pointer-events: auto;
+    }
+    .touch-steer-label {
+      position: absolute;
+      left: 12px;
+      top: 10px;
+      font-size: 12px;
+      opacity: 0.86;
+      color: rgba(255,255,255,0.9);
+      user-select: none;
+    }
+    .touch-buttons {
+      position: fixed;
+      right: 10px;
+      bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+      display: grid;
+      gap: 10px;
+      pointer-events: auto;
+    }
+    .touch-btn {
+      min-width: 96px;
+      min-height: 46px;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(12,20,34,0.56);
+      color: rgba(255,255,255,0.96);
+      font: 600 14px/1 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      backdrop-filter: blur(8px);
+      text-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    }
+    .touch-btn.primary { background: rgba(34,85,62,0.58); }
+    .touch-btn.warn { background: rgba(85,58,34,0.6); }
+    .touch-btn.active { transform: scale(0.98); filter: brightness(1.12); }
+    @media (max-width: 900px), (pointer: coarse) {
+      .hud {
+        left: max(10px, env(safe-area-inset-left, 0px));
+        top: max(8px, env(safe-area-inset-top, 0px));
+        max-width: min(96vw, 560px);
+      }
+      .hud .row { gap: 8px; }
+      .pill { font-size: 13px; padding: 5px 9px; }
+      .hint { font-size: 12px; }
+      .touch-controls { display: block; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <div class="hud" id="hud">
+    <div class="row">
+      <div class="pill" id="scorePill">Score: 0</div>
+      <div class="pill" id="distPill">Distance: 0 m</div>
+      <div class="pill" id="speedPill">Speed: 0.0</div>
+      <div class="pill" id="bestPill">Best: 0</div>
+      <div class="pill" id="audioPill">Audio: Off</div>
+      <button class="pill help-btn" id="helpBtn" type="button">How to play</button>
+    </div>
+    <div class="hint">
+      Move: <span class="kbd">A</span>/<span class="kbd">D</span> or <span class="kbd">←</span>/<span class="kbd">→</span> ·
+      Go fast: <span class="kbd">W</span>/<span class="kbd">↑</span>/<span class="kbd">Space</span> ·
+      Brake: <span class="kbd">S</span>/<span class="kbd">↓</span> · Mute: <span class="kbd">M</span> · <span class="nowrap">Chill: <span class="kbd">C</span></span>
+    </div>
+    <div class="help-panel" id="helpPanel" style="display:none;">
+      <h2>How to play</h2>
+      <p>Goal: stay alive as long as possible, avoid obstacles, and run up your score.</p>
+      <p>Scoring: you always gain score while moving, and faster speed gives proportionally more score for the same distance.</p>
+      <p>Use go-fast to boost scoring pace, brake when needed to avoid crashes, and collect berries for bonus points.</p>
+      <p>Tip: press <span class="kbd">H</span> to toggle this panel, <span class="kbd">Esc</span> to close it.</p>
+    </div>
+  </div>
+
+  <div class="touch-controls" id="touchControls" aria-hidden="true">
+    <div class="touch-steer" id="steerZone">
+      <div class="touch-steer-label">Steer lane</div>
+    </div>
+    <div class="touch-buttons">
+      <button class="touch-btn primary" id="fastBtn" type="button">Go Fast</button>
+      <button class="touch-btn warn" id="brakeBtn" type="button">Brake</button>
+      <button class="touch-btn" id="chillBtn" type="button">Chill</button>
+      <button class="touch-btn" id="muteBtn" type="button">Mute</button>
+    </div>
+  </div>
+
+  <div class="center" id="overlay" style="display:none;">
+    <div class="card" id="overlayCard">
+      <h1>Ouch — you tangled your skis!</h1>
+      <p id="overlayText">Press <span class="kbd">R</span> to restart.</p>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // ===== Canvas setup =====
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+
+  function resize() {
+    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    canvas.width = Math.floor(innerWidth * dpr);
+    canvas.height = Math.floor(innerHeight * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  addEventListener('resize', resize);
+  resize();
+
+  // ===== HUD =====
+  const hud      = document.getElementById('hud');
+  const scorePill = document.getElementById('scorePill');
+  const distPill  = document.getElementById('distPill');
+  const speedPill = document.getElementById('speedPill');
+  const bestPill  = document.getElementById('bestPill');
+  const audioPill = document.getElementById('audioPill');
+  const helpBtn   = document.getElementById('helpBtn');
+  const helpPanel = document.getElementById('helpPanel');
+  const touchControls = document.getElementById('touchControls');
+  const steerZone = document.getElementById('steerZone');
+  const fastBtn = document.getElementById('fastBtn');
+  const brakeBtn = document.getElementById('brakeBtn');
+  const chillBtn = document.getElementById('chillBtn');
+  const muteBtn = document.getElementById('muteBtn');
+  const overlay   = document.getElementById('overlay');
+  const overlayText = document.getElementById('overlayText');
+
+  const STORAGE_KEY = "lappish_xc_best_v1";
+  let best = Number(localStorage.getItem(STORAGE_KEY) || 0);
+  bestPill.textContent = `Best: ${best}`;
+
+  function setHelpOpen(open) {
+    helpPanel.style.display = open ? "block" : "none";
+  }
+
+  function setGameplayUiVisible(visible) {
+    const display = visible ? "" : "none";
+    hud.style.display = display;
+    touchControls.style.display = display;
+  }
+
+  function enterChillMode() {
+    world.chillMode = true;
+    world.alive = true;
+    world.shake = 0;
+    obstacles.length = 0;
+    pickups.length = 0;
+    touchInput.fast = false;
+    touchInput.brake = false;
+    touchInput.steering = false;
+    setTouchActive(fastBtn, false);
+    setTouchActive(brakeBtn, false);
+    overlay.style.display = "none";
+    setHelpOpen(false);
+    setGameplayUiVisible(false);
+  }
+
+  function toggleChillMode() {
+    if (world.chillMode) location.reload();
+    else enterChillMode();
+  }
+
+  const touchInput = {
+    steering: false,
+    targetY: 0,
+    fast: false,
+    brake: false,
+    chillTapAt: 0,
+  };
+
+  function setTouchActive(button, active) {
+    button.classList.toggle("active", active);
+  }
+
+  function setSteerFromPointer(clientY) {
+    const { top, bot } = getTrackBounds();
+    touchInput.targetY = clamp(clientY, top + PLAYER_TOP_PADDING, bot - PLAYER_BOTTOM_PADDING);
+  }
+
+  // ===== Input =====
+  const keys = new Set();
+  addEventListener('keydown', (e) => {
+    audio.ensureStarted();
+    if (e.code === "KeyC") {
+      toggleChillMode();
+      return;
+    }
+    if (e.code === "KeyM") {
+      audio.toggleMute();
+      return;
+    }
+    if (e.code === "KeyH") {
+      setHelpOpen(helpPanel.style.display === "none");
+      return;
+    }
+    if (e.code === "Escape") {
+      setHelpOpen(false);
+    }
+    keys.add(e.code);
+    if (["Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.code)) e.preventDefault();
+  }, { passive:false });
+  addEventListener('keyup', (e) => keys.delete(e.code));
+  helpBtn.addEventListener('click', () => {
+    audio.ensureStarted();
+    setHelpOpen(helpPanel.style.display === "none");
+  });
+  canvas.addEventListener('pointerdown', () => {
+    audio.ensureStarted();
+    if (!world.chillMode) return;
+    const now = performance.now();
+    if (now - touchInput.chillTapAt < 360) location.reload();
+    touchInput.chillTapAt = now;
+  });
+
+  steerZone.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    audio.ensureStarted();
+    touchInput.steering = true;
+    setSteerFromPointer(e.clientY);
+    steerZone.setPointerCapture?.(e.pointerId);
+  });
+  steerZone.addEventListener('pointermove', (e) => {
+    if (!touchInput.steering) return;
+    e.preventDefault();
+    setSteerFromPointer(e.clientY);
+  });
+  const stopSteering = () => { touchInput.steering = false; };
+  steerZone.addEventListener('pointerup', stopSteering);
+  steerZone.addEventListener('pointercancel', stopSteering);
+  steerZone.addEventListener('pointerleave', stopSteering);
+
+  const bindHoldButton = (el, key) => {
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      audio.ensureStarted();
+      touchInput[key] = true;
+      setTouchActive(el, true);
+      el.setPointerCapture?.(e.pointerId);
+    });
+    const off = () => {
+      touchInput[key] = false;
+      setTouchActive(el, false);
+    };
+    el.addEventListener('pointerup', off);
+    el.addEventListener('pointercancel', off);
+    el.addEventListener('pointerleave', off);
+  };
+  bindHoldButton(fastBtn, "fast");
+  bindHoldButton(brakeBtn, "brake");
+  muteBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    audio.ensureStarted();
+    audio.toggleMute();
+  });
+  chillBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    audio.ensureStarted();
+    toggleChillMode();
+  });
+
+  const pressed = (code) => keys.has(code);
+
+  // ===== Game tuning =====
+  const TRACK_TOP_MARGIN = 8;
+  const TRACK_BOTTOM_MARGIN = 110;
+  const BASE_SPEED = 3.2;
+  const MAX_SPEED = 8.5;
+  const BASE_SCORE_RATE = 2.2;
+  const FAST_RAMP_BONUS = 0.45;
+  const PLAYER_TOP_PADDING = 6;
+  const PLAYER_BOTTOM_PADDING = 20;
+
+  function getTrackBounds(h = innerHeight) {
+    // Keep playable lanes inside the visible snow band.
+    const top = h * 0.55 + TRACK_TOP_MARGIN;
+    const bot = h - TRACK_BOTTOM_MARGIN;
+    return { top, bot };
+  }
+
+  const skier = {
+    x: 170,
+    y: 0,
+    vy: 0,
+    radius: 18,
+    lean: 0,       // visual tilt
+  };
+
+  const world = {
+    t: 0,
+    speed: BASE_SPEED,
+    targetSpeed: BASE_SPEED,
+    distance: 0, // meters-ish
+    score: 0,
+    alive: true,
+    chillMode: false,
+    shake: 0,
+    auroraPhase: 0,
+  };
+
+  // ===== Utility =====
+  const rand = (a,b)=>a+Math.random()*(b-a);
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const lerp=(a,b,t)=>a+(b-a)*t;
+
+  function circleHit(ax,ay,ar,bx,by,br){
+    const dx=ax-bx, dy=ay-by;
+    return dx*dx+dy*dy <= (ar+br)*(ar+br);
+  }
+
+  // ===== Audio =====
+  function createAudioEngine({ onStatus }) {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) {
+      onStatus("Audio: Unsupported");
+      return {
+        ensureStarted() {},
+        tickFromGame() {},
+        onPickup() {},
+        onCrash() {},
+        onReset() {},
+        toggleMute() {},
+      };
+    }
+
+    let ctx = null;
+    let master = null;
+    let toneFilter = null;
+    let delaySend = null;
+    let bassOsc = null;
+    let bassGain = null;
+    let windGain = null;
+    let windFilter = null;
+    let started = false;
+    let muted = false;
+    let nextNoteTime = 0;
+    let rootMidi = 50; // D3
+    let tempo = 66;
+    let targetCutoff = 1200;
+    let smoothCutoff = 1200;
+    const mode = [0, 2, 3, 5, 7, 9, 10]; // Dorian feel
+
+    const midiToHz = (m) => 440 * Math.pow(2, (m - 69) / 12);
+
+    function init() {
+      if (ctx) return;
+      ctx = new AudioCtx();
+
+      master = ctx.createGain();
+      master.gain.value = 0.0;
+
+      toneFilter = ctx.createBiquadFilter();
+      toneFilter.type = "lowpass";
+      toneFilter.frequency.value = 1200;
+      toneFilter.Q.value = 0.4;
+
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -20;
+      comp.knee.value = 18;
+      comp.ratio.value = 3.2;
+      comp.attack.value = 0.01;
+      comp.release.value = 0.28;
+
+      delaySend = ctx.createGain();
+      delaySend.gain.value = 0.0;
+
+      const delay = ctx.createDelay(1.5);
+      delay.delayTime.value = 0.42;
+      const feedback = ctx.createGain();
+      feedback.gain.value = 0.24;
+      const delayTone = ctx.createBiquadFilter();
+      delayTone.type = "lowpass";
+      delayTone.frequency.value = 2400;
+      const delayWet = ctx.createGain();
+      delayWet.gain.value = 0.2;
+
+      delaySend.connect(delay);
+      delay.connect(delayTone);
+      delayTone.connect(feedback);
+      feedback.connect(delay);
+      delayTone.connect(delayWet);
+      delayWet.connect(master);
+
+      master.connect(toneFilter);
+      toneFilter.connect(comp);
+      comp.connect(ctx.destination);
+
+      // Continuous low bass drone
+      bassOsc = ctx.createOscillator();
+      bassOsc.type = "triangle";
+      bassOsc.frequency.value = midiToHz(rootMidi - 12);
+      bassGain = ctx.createGain();
+      bassGain.gain.value = 0.0;
+      bassOsc.connect(bassGain);
+      bassGain.connect(master);
+      bassGain.connect(delaySend);
+      bassOsc.start();
+
+      // Wind bed
+      const noiseBuffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+      const ch = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * 0.55;
+      const noise = ctx.createBufferSource();
+      noise.buffer = noiseBuffer;
+      noise.loop = true;
+      windFilter = ctx.createBiquadFilter();
+      windFilter.type = "bandpass";
+      windFilter.frequency.value = 520;
+      windFilter.Q.value = 0.4;
+      windGain = ctx.createGain();
+      windGain.gain.value = 0.0;
+      noise.connect(windFilter);
+      windFilter.connect(windGain);
+      windGain.connect(master);
+      noise.start();
+
+      nextNoteTime = ctx.currentTime + 0.12;
+    }
+
+    function playPadNote(time, midi, seconds, level, send = 0.35) {
+      const vca = ctx.createGain();
+      vca.gain.setValueAtTime(0.0001, time);
+      vca.gain.linearRampToValueAtTime(level, time + 1.1);
+      vca.gain.linearRampToValueAtTime(0.0001, time + seconds);
+
+      const vcf = ctx.createBiquadFilter();
+      vcf.type = "lowpass";
+      vcf.frequency.setValueAtTime(700, time);
+      vcf.frequency.linearRampToValueAtTime(1500 + Math.random() * 700, time + Math.min(2.4, seconds * 0.6));
+      vcf.Q.value = 0.35;
+
+      const a = ctx.createOscillator();
+      a.type = "sawtooth";
+      a.frequency.setValueAtTime(midiToHz(midi), time);
+      a.detune.value = -4;
+      const b = ctx.createOscillator();
+      b.type = "triangle";
+      b.frequency.setValueAtTime(midiToHz(midi + (Math.random() < 0.2 ? 12 : 0)), time);
+      b.detune.value = 5;
+
+      a.connect(vcf);
+      b.connect(vcf);
+      vcf.connect(vca);
+      vca.connect(master);
+
+      const sendGain = ctx.createGain();
+      sendGain.gain.value = send;
+      vca.connect(sendGain);
+      sendGain.connect(delaySend);
+
+      a.start(time);
+      b.start(time);
+      a.stop(time + seconds + 0.2);
+      b.stop(time + seconds + 0.2);
+    }
+
+    function playBell(time, midi, level = 0.11) {
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, time);
+      gain.gain.exponentialRampToValueAtTime(level, time + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.48);
+
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(midiToHz(midi), time);
+      osc.frequency.exponentialRampToValueAtTime(midiToHz(midi) * 0.98, time + 0.2);
+
+      const shimmer = ctx.createOscillator();
+      shimmer.type = "triangle";
+      shimmer.frequency.setValueAtTime(midiToHz(midi + 12), time);
+      const shimmerGain = ctx.createGain();
+      shimmerGain.gain.value = level * 0.35;
+
+      osc.connect(gain);
+      shimmer.connect(shimmerGain);
+      shimmerGain.connect(gain);
+      gain.connect(master);
+      gain.connect(delaySend);
+      osc.start(time);
+      shimmer.start(time);
+      osc.stop(time + 0.52);
+      shimmer.stop(time + 0.52);
+    }
+
+    function playCrash() {
+      const t = ctx.currentTime;
+      const buffer = ctx.createBuffer(1, ctx.sampleRate * 0.35, ctx.sampleRate);
+      const ch = buffer.getChannelData(0);
+      for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * (1 - i / ch.length);
+
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      const hp = ctx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.setValueAtTime(260, t);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.24, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+
+      const drop = ctx.createOscillator();
+      drop.type = "sine";
+      drop.frequency.setValueAtTime(110, t);
+      drop.frequency.exponentialRampToValueAtTime(42, t + 0.22);
+      const dropGain = ctx.createGain();
+      dropGain.gain.setValueAtTime(0.12, t);
+      dropGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.24);
+
+      src.connect(hp);
+      hp.connect(g);
+      g.connect(master);
+      drop.connect(dropGain);
+      dropGain.connect(master);
+
+      src.start(t);
+      drop.start(t);
+      src.stop(t + 0.33);
+      drop.stop(t + 0.25);
+    }
+
+    function scheduleAmbient(distance) {
+      const step = Math.random() < 0.65 ? 2 : (Math.random() < 0.7 ? 3 : 1);
+      const beat = 60 / tempo;
+      const holdBeats = 2 + (Math.random() < 0.55 ? 1 : 0) + (Math.random() < 0.25 ? 1 : 0);
+      const octave = Math.random() < 0.2 ? 12 : 0;
+      const deg = mode[Math.floor(Math.random() * mode.length)];
+      const midi = rootMidi + deg + octave;
+      playPadNote(nextNoteTime, midi, holdBeats * beat + 0.8, 0.038 + Math.random() * 0.02);
+      if (Math.random() < 0.28) playBell(nextNoteTime + beat * 0.5, rootMidi + mode[(Math.floor(Math.random() * 3) + 2) % mode.length] + 12, 0.05);
+      nextNoteTime += beat * step;
+      rootMidi = (Math.floor(distance / 900) % 2 === 0) ? 50 : 48;
+      bassOsc.frequency.setTargetAtTime(midiToHz(rootMidi - 12), ctx.currentTime, 0.8);
+    }
+
+    function ensureStarted() {
+      init();
+      if (started) return;
+      ctx.resume();
+      started = true;
+      master.gain.setTargetAtTime(muted ? 0.0 : 0.22, ctx.currentTime, 1.6);
+      bassGain.gain.setTargetAtTime(0.08, ctx.currentTime, 2.0);
+      windGain.gain.setTargetAtTime(0.04, ctx.currentTime, 2.4);
+      onStatus(muted ? "Audio: Muted" : "Audio: On");
+    }
+
+    return {
+      ensureStarted() {
+        ensureStarted();
+      },
+      tickFromGame(game) {
+        if (!started) return;
+        const speedNorm = clamp((game.speed - BASE_SPEED) / (MAX_SPEED - BASE_SPEED), 0, 1);
+        tempo = 62 + speedNorm * 22;
+        targetCutoff = game.alive ? (900 + speedNorm * 1800) : 520;
+        smoothCutoff = lerp(smoothCutoff, targetCutoff, 0.05);
+        toneFilter.frequency.setTargetAtTime(smoothCutoff, ctx.currentTime, 0.1);
+        windFilter.frequency.setTargetAtTime(420 + speedNorm * 380, ctx.currentTime, 0.18);
+        delaySend.gain.setTargetAtTime(0.14 + speedNorm * 0.18, ctx.currentTime, 0.28);
+        bassGain.gain.setTargetAtTime(game.alive ? 0.07 : 0.03, ctx.currentTime, 0.7);
+        windGain.gain.setTargetAtTime(game.alive ? (0.03 + speedNorm * 0.04) : 0.015, ctx.currentTime, 0.6);
+
+        while (nextNoteTime < ctx.currentTime + 0.24) {
+          scheduleAmbient(game.distance);
+        }
+      },
+      onPickup() {
+        if (!started) return;
+        playBell(ctx.currentTime + 0.01, rootMidi + 14 + (Math.random() < 0.5 ? 0 : 3), 0.095);
+      },
+      onCrash() {
+        if (!started) return;
+        playCrash();
+      },
+      onReset() {
+        if (!started) return;
+        const t = ctx.currentTime;
+        playBell(t + 0.03, rootMidi + 7, 0.08);
+        master.gain.cancelScheduledValues(t);
+        master.gain.setTargetAtTime(muted ? 0.0 : 0.22, t, 0.8);
+      },
+      toggleMute() {
+        ensureStarted();
+        muted = !muted;
+        master.gain.setTargetAtTime(muted ? 0.0 : 0.22, ctx.currentTime, 0.09);
+        onStatus(muted ? "Audio: Muted" : "Audio: On");
+      },
+    };
+  }
+
+  const audio = createAudioEngine({
+    onStatus: (label) => { audioPill.textContent = label; }
+  });
+
+  // ===== Entities =====
+  const obstacles = []; // trees, rocks, reindeer
+  const pickups   = []; // berries
+  const snowPuffs = []; // particles
+
+  function spawnTree() {
+    const { top, bot } = getTrackBounds();
+    const laneY = rand(top + 20, bot - 20);
+    obstacles.push({
+      type: "tree",
+      x: innerWidth + rand(40, 200),
+      y: laneY,
+      r: rand(20, 34),
+      wobble: rand(0, Math.PI*2),
+    });
+  }
+
+  function spawnRock() {
+    const { top, bot } = getTrackBounds();
+    const laneY = rand(top + 30, bot - 30);
+    obstacles.push({
+      type: "rock",
+      x: innerWidth + rand(40, 220),
+      y: laneY,
+      r: rand(16, 26),
+      wobble: rand(0, Math.PI*2),
+    });
+  }
+
+  function spawnReindeer() {
+    // Reindeer crosses slowly — small window to slip by.
+    const { top, bot } = getTrackBounds();
+    const laneY = rand(top + 40, bot - 40);
+    obstacles.push({
+      type: "reindeer",
+      x: innerWidth + rand(80, 280),
+      y: laneY,
+      r: 24,
+      vx: -rand(0.4, 1.1),
+      phase: rand(0, Math.PI*2),
+    });
+  }
+
+  function spawnBerries() {
+    const { top, bot } = getTrackBounds();
+    const laneY = rand(top + 30, bot - 30);
+    pickups.push({
+      type: "berries",
+      x: innerWidth + rand(80, 240),
+      y: laneY,
+      r: 14,
+      tw: rand(0, Math.PI*2),
+      value: 25,
+    });
+  }
+
+  // ===== Background: fells, aurora, stars =====
+  const stars = Array.from({length: 140}, () => ({
+    x: Math.random(),
+    y: Math.random(),
+    s: rand(0.6, 1.8),
+    a: rand(0.2, 0.9),
+    tw: rand(0, Math.PI*2),
+  }));
+
+  const fellLayers = [
+    { par: 0.10, baseY: 0.55, amp: 0.06, rough: 0.7, colorA: "#0b1b2f", colorB:"#0a1627" },
+    { par: 0.18, baseY: 0.62, amp: 0.08, rough: 0.9, colorA: "#0d223b", colorB:"#0b1c33" },
+    { par: 0.28, baseY: 0.72, amp: 0.10, rough: 1.1, colorA: "#103053", colorB:"#0d2744" },
+  ];
+
+  function noise1d(x){
+    // cheap pseudo noise
+    return Math.sin(x*0.9) * 0.55 + Math.sin(x*2.1) * 0.25 + Math.sin(x*4.2) * 0.12;
+  }
+
+  function drawSky() {
+    const w = innerWidth, h = innerHeight;
+    // gradient night sky
+    const g = ctx.createLinearGradient(0,0,0,h);
+    g.addColorStop(0, "#07111f");
+    g.addColorStop(0.45, "#081a2b");
+    g.addColorStop(1, "#0b2740");
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,w,h);
+
+    // stars
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    for (const st of stars) {
+      const tw = 0.5 + 0.5*Math.sin(world.t*0.8 + st.tw);
+      ctx.globalAlpha = st.a * (0.6 + 0.4*tw);
+      ctx.fillStyle = "#dff3ff";
+      const sx = st.x*w;
+      const sy = st.y*h*0.55;
+      ctx.beginPath();
+      ctx.arc(sx, sy, st.s, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // aurora ribbons
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    const chill = world.chillMode;
+    const base = (chill ? 78 : 90) + 18*Math.sin(world.t*0.35);
+    const bandCount = chill ? 5 : 3;
+    for (let band=0; band<bandCount; band++) {
+      ctx.beginPath();
+      const yStep = chill ? 20 : 26;
+      const y0 = base + band*yStep + 12*Math.sin(world.t*0.7 + band);
+      for (let x=0; x<=w; x+=12) {
+        const t = x/w;
+        const wave = (chill ? 28 : 22)*Math.sin(world.t*0.65 + t*7.0 + band*1.7) +
+                     (chill ? 14 : 10)*Math.sin(world.t*1.1 + t*15.0);
+        const y = y0 + wave;
+        if (x===0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      const grad = ctx.createLinearGradient(0, y0-40, 0, y0+60);
+      if (chill) {
+        const palette = [
+          ["rgba(120,255,185,0)", "rgba(120,255,185,0.62)", "rgba(175,110,255,0.42)", "rgba(120,255,185,0)"],
+          ["rgba(175,110,255,0)", "rgba(175,110,255,0.58)", "rgba(255,110,155,0.40)", "rgba(175,110,255,0)"],
+          ["rgba(255,90,120,0)", "rgba(255,120,150,0.52)", "rgba(110,255,185,0.38)", "rgba(255,90,120,0)"],
+        ][band % 3];
+        grad.addColorStop(0, palette[0]);
+        grad.addColorStop(0.35, palette[1]);
+        grad.addColorStop(0.7, palette[2]);
+        grad.addColorStop(1, palette[3]);
+      } else {
+        grad.addColorStop(0, "rgba(80,255,200,0)");
+        grad.addColorStop(0.35, band===1 ? "rgba(110,255,210,0.45)" : "rgba(90,240,210,0.35)");
+        grad.addColorStop(0.7, "rgba(120,140,255,0.22)");
+        grad.addColorStop(1, "rgba(80,255,200,0)");
+      }
+      ctx.strokeStyle = grad;
+      ctx.globalAlpha = chill ? 0.78 : 0.65;
+      ctx.lineWidth = (chill ? 38 : 34) - band*6;
+      ctx.lineCap = "round";
+      ctx.stroke();
+      if (chill) {
+        // extra bloom pass for scenic mode
+        ctx.globalAlpha = 0.30;
+        ctx.lineWidth += 12;
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawFells() {
+    const w = innerWidth, h = innerHeight;
+
+    for (const L of fellLayers) {
+      const horizonY = h * L.baseY;
+      const amp = h * L.amp;
+      const parX = (world.distance * 0.6) * L.par;
+
+      // filled shape
+      ctx.beginPath();
+      ctx.moveTo(0, h);
+      for (let x=0; x<=w; x+=14) {
+        const nx = (x*0.003) + parX*0.01;
+        const n = noise1d(nx*L.rough);
+        const y = horizonY + n*amp;
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(w, h);
+      ctx.closePath();
+
+      const g = ctx.createLinearGradient(0, horizonY-amp, 0, h);
+      g.addColorStop(0, L.colorA);
+      g.addColorStop(1, L.colorB);
+      ctx.fillStyle = g;
+      ctx.fill();
+    }
+  }
+
+  function drawGroundAndTrack() {
+    const w = innerWidth, h = innerHeight;
+    // snow gradient
+    const g = ctx.createLinearGradient(0, h*0.55, 0, h);
+    g.addColorStop(0, "#d9eef9");
+    g.addColorStop(1, "#b8d7ea");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, h*0.55, w, h*0.45);
+
+    // track (two grooves)
+    const { top, bot } = getTrackBounds(h);
+    const trackH = bot - top;
+
+    // subtle fog
+    ctx.save();
+    ctx.globalAlpha = 0.08;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, top, w, trackH);
+    ctx.restore();
+
+    const centerY = top + trackH*0.62;
+    const laneW = 14;
+    const grooveSep = 16;
+
+    // track shading
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+    for (let i=0; i<2; i++) {
+      const y = centerY + (i===0 ? -grooveSep/2 : grooveSep/2);
+      ctx.fillStyle = "rgba(80,120,150,0.18)";
+      ctx.fillRect(0, y-2.5, w, 5);
+      ctx.fillStyle = "rgba(255,255,255,0.30)";
+      ctx.fillRect(0, y-1, w, 2);
+    }
+    ctx.restore();
+
+    // scrolling snow texture lines
+    ctx.save();
+    ctx.globalAlpha = 0.12;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1;
+    const scroll = (world.distance*8) % 60;
+    for (let y=top; y<bot; y+=18) {
+      ctx.beginPath();
+      for (let x=0; x<=w; x+=60) {
+        const xx = x - scroll;
+        const wig = 2*Math.sin((y*0.08) + (world.t*0.9));
+        ctx.moveTo(xx, y+wig);
+        ctx.lineTo(xx+26, y+wig+0.5);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+
+  }
+
+  // ===== Draw obstacles/pickups =====
+  function drawTree(o) {
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    const sway = 0.06*Math.sin(world.t*1.5 + o.wobble);
+    ctx.rotate(sway);
+
+    // trunk
+    ctx.fillStyle = "#4a2d1b";
+    ctx.fillRect(-4, o.r*0.4, 8, o.r*0.9);
+
+    // layers
+    for (let i=0; i<3; i++) {
+      const y = -o.r*0.35 + i*(o.r*0.33);
+      const w = o.r*1.4 - i*o.r*0.22;
+      const h = o.r*0.6;
+      ctx.beginPath();
+      ctx.moveTo(0, y - h*0.85);
+      ctx.lineTo(-w*0.6, y + h*0.4);
+      ctx.lineTo(w*0.6, y + h*0.4);
+      ctx.closePath();
+      ctx.fillStyle = i===0 ? "#1c5a3b" : (i===1 ? "#1a5236" : "#164a31");
+      ctx.fill();
+    }
+
+    // snow caps
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.beginPath();
+    ctx.arc(0, -o.r*0.52, o.r*0.22, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawRock(o) {
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    const bob = 1.2*Math.sin(world.t*2 + o.wobble);
+    ctx.translate(0, bob);
+    ctx.fillStyle = "#5e6b75";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, o.r*1.1, o.r*0.75, 0.2, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.7)";
+    ctx.beginPath();
+    ctx.ellipse(-o.r*0.25, -o.r*0.18, o.r*0.35, o.r*0.18, -0.3, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawReindeer(o) {
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    const step = 1.6*Math.sin(world.t*6 + o.phase);
+    // body
+    ctx.fillStyle = "#6b4a2b";
+    ctx.beginPath();
+    ctx.ellipse(0, -8, 22, 12, 0, 0, Math.PI*2);
+    ctx.fill();
+    // head
+    ctx.beginPath();
+    ctx.ellipse(22, -14, 10, 8, 0.2, 0, Math.PI*2);
+    ctx.fill();
+    // legs
+    ctx.strokeStyle = "#3e2a18";
+    ctx.lineWidth = 3;
+    for (let i=0;i<4;i++){
+      const lx = -14 + i*10;
+      ctx.beginPath();
+      ctx.moveTo(lx, 2);
+      ctx.lineTo(lx + (i%2===0? step: -step)*0.5, 18);
+      ctx.stroke();
+    }
+    // antlers
+    ctx.strokeStyle = "#3f2a16";
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(28, -24);
+    ctx.lineTo(34, -34);
+    ctx.lineTo(38, -30);
+    ctx.moveTo(34, -34);
+    ctx.lineTo(30, -38);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawBerries(p) {
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    const pulse = 0.9 + 0.12*Math.sin(world.t*4 + p.tw);
+    ctx.scale(pulse, pulse);
+    // leaves
+    ctx.fillStyle = "#1c6a43";
+    ctx.beginPath();
+    ctx.ellipse(-6, -10, 8, 4, -0.6, 0, Math.PI*2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(6, -10, 8, 4, 0.6, 0, Math.PI*2);
+    ctx.fill();
+    // berries cluster
+    const reds = ["#e53b4f","#d92c44","#ff5a6c"];
+    for (let i=0;i<6;i++){
+      const a = i*(Math.PI*2/6);
+      const bx = 10*Math.cos(a)*0.55;
+      const by = 10*Math.sin(a)*0.45 + 2;
+      ctx.fillStyle = reds[i%reds.length];
+      ctx.beginPath();
+      ctx.arc(bx, by, 4.2, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.fillStyle = "rgba(255,255,255,0.8)";
+    ctx.beginPath();
+    ctx.arc(-2, 2, 2, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ===== Skier drawing =====
+  function drawSkier() {
+    const x = skier.x, y = skier.y;
+    ctx.save();
+    ctx.translate(x, y);
+
+    // shadow on snow
+    ctx.save();
+    ctx.globalAlpha = 0.15;
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    ctx.ellipse(0, 18, 26, 10, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+
+    // lean
+    ctx.rotate(skier.lean);
+
+    // skis
+    ctx.strokeStyle = "rgba(40,60,80,0.9)";
+    ctx.lineWidth = 5;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(-22, 18);
+    ctx.lineTo(26, 12);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-18, 22);
+    ctx.lineTo(30, 16);
+    ctx.stroke();
+
+    // body
+    ctx.fillStyle = "#c41f3c"; // red jacket pops in snow
+    ctx.beginPath();
+    ctx.roundRect(-10, -22, 20, 28, 10);
+    ctx.fill();
+
+    // head
+    ctx.fillStyle = "#ffd9bf";
+    ctx.beginPath();
+    ctx.arc(0, -28, 10, 0, Math.PI*2);
+    ctx.fill();
+
+    // hat
+    ctx.fillStyle = "#1b355a";
+    ctx.beginPath();
+    ctx.arc(0, -32, 11, Math.PI, Math.PI*2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillRect(-11, -33, 22, 6);
+
+    // poles
+    const poleSwing = 0.9*Math.sin(world.t*9) * (0.6 + 0.4*world.speed/6);
+    const leftGripX = -6, rightGripX = 6;
+    const gripY = -6, tipY = 24;
+    const leftTipX = -20 - poleSwing*6;
+    const rightTipX = 20 + poleSwing*6;
+
+    // shafts
+    ctx.strokeStyle = "rgba(78, 99, 123, 0.98)";
+    ctx.lineWidth = 2.6;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(leftGripX, gripY);
+    ctx.lineTo(leftTipX, tipY);
+    ctx.moveTo(rightGripX, gripY);
+    ctx.lineTo(rightTipX, tipY);
+    ctx.stroke();
+
+    // grips
+    ctx.fillStyle = "#243548";
+    ctx.fillRect(leftGripX - 2.4, gripY - 2, 4.8, 4.2);
+    ctx.fillRect(rightGripX - 2.4, gripY - 2, 4.8, 4.2);
+
+    // straps
+    ctx.strokeStyle = "rgba(36, 53, 72, 0.85)";
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    ctx.arc(leftGripX, gripY + 0.4, 2.2, 0.2*Math.PI, 1.25*Math.PI);
+    ctx.arc(rightGripX, gripY + 0.4, 2.2, -0.25*Math.PI, 0.8*Math.PI);
+    ctx.stroke();
+
+    // baskets and tips near the snow
+    ctx.strokeStyle = "rgba(50, 70, 92, 0.95)";
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.arc(leftTipX, tipY - 1.2, 2.1, 0, Math.PI*2);
+    ctx.arc(rightTipX, tipY - 1.2, 2.1, 0, Math.PI*2);
+    ctx.stroke();
+    ctx.fillStyle = "#5b6f86";
+    ctx.beginPath();
+    ctx.arc(leftTipX, tipY + 1.8, 0.9, 0, Math.PI*2);
+    ctx.arc(rightTipX, tipY + 1.8, 0.9, 0, Math.PI*2);
+    ctx.fill();
+
+    // scarf flutter
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = "#f2c14e";
+    ctx.beginPath();
+    ctx.moveTo(6, -16);
+    ctx.quadraticCurveTo(26, -10 + poleSwing*6, 34, -2 + poleSwing*5);
+    ctx.quadraticCurveTo(22, -4 + poleSwing*2, 10, -8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  // Polyfill for roundRect for older browsers
+  if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x,y,w,h,r){
+      r = Math.min(r, w/2, h/2);
+      this.beginPath();
+      this.moveTo(x+r, y);
+      this.arcTo(x+w, y, x+w, y+h, r);
+      this.arcTo(x+w, y+h, x, y+h, r);
+      this.arcTo(x, y+h, x, y, r);
+      this.arcTo(x, y, x+w, y, r);
+      this.closePath();
+      return this;
+    };
+  }
+
+  // ===== Snow particles =====
+  function puff(x,y, n=8) {
+    for (let i=0;i<n;i++){
+      snowPuffs.push({
+        x, y,
+        vx: rand(-1.6, -0.2),
+        vy: rand(-1.1, 1.1),
+        r: rand(1.2, 3.2),
+        a: rand(0.25, 0.55),
+        life: rand(18, 32)
+      });
+    }
+  }
+
+  // ===== Game loop =====
+  let last = performance.now();
+  function step(now) {
+    const dt = Math.min(0.033, (now - last)/1000);
+    last = now;
+
+    update(dt);
+    render();
+
+    requestAnimationFrame(step);
+  }
+
+  function reset() {
+    obstacles.length = 0;
+    pickups.length = 0;
+    snowPuffs.length = 0;
+
+    world.t = 0;
+    world.speed = BASE_SPEED;
+    world.targetSpeed = BASE_SPEED;
+    world.distance = 0;
+    world.score = 0;
+    world.alive = true;
+    world.chillMode = false;
+    world.shake = 0;
+
+    const { top, bot } = getTrackBounds();
+    skier.y = top + (bot - top) * 0.62;
+    skier.vy = 0;
+    skier.lean = 0;
+
+    overlay.style.display = "none";
+    setGameplayUiVisible(true);
+    touchInput.fast = false;
+    touchInput.brake = false;
+    touchInput.steering = false;
+    setTouchActive(fastBtn, false);
+    setTouchActive(brakeBtn, false);
+    audio.onReset();
+  }
+
+  // Start position
+  reset();
+
+  // Spawners
+  let spawnTimer = 0;
+  let berryTimer = 0;
+
+  function update(dt) {
+    world.t += dt;
+    audio.tickFromGame(world);
+    if (!world.alive) {
+      // allow restart
+      if (pressed("KeyR")) reset();
+      // slow shake decay
+      world.shake = Math.max(0, world.shake - dt*2.5);
+      return;
+    }
+
+    // Inputs
+    const up = pressed("KeyA") || pressed("ArrowLeft");
+    const down = pressed("KeyD") || pressed("ArrowRight");
+    const stride = pressed("KeyW") || pressed("ArrowUp") || pressed("Space") || touchInput.fast;
+    const brake = pressed("KeyS") || pressed("ArrowDown") || touchInput.brake;
+
+    // speed control
+    world.targetSpeed = BASE_SPEED + Math.min(4.2, world.distance/900) * 0.55; // gently gets faster
+    if (stride) {
+      world.targetSpeed += 1.2;
+      if (Math.random() < 0.25) puff(skier.x-10, skier.y+18, 4);
+    }
+    if (brake) world.targetSpeed -= 2.0;
+
+    world.targetSpeed = clamp(world.targetSpeed, 1.2, MAX_SPEED);
+    world.speed = lerp(world.speed, world.targetSpeed, 1 - Math.pow(0.001, dt)); // smooth
+
+    // vertical motion
+    const steerAccel = touchInput.steering ? clamp((touchInput.targetY - skier.y) * 7.2, -460, 460) : 0;
+    const accelY = steerAccel + (down ? 420 : 0) + (up ? -420 : 0);
+    skier.vy += accelY * dt;
+    skier.vy *= Math.pow(0.001, dt); // strong damping
+    skier.y += skier.vy * dt;
+
+    const { top, bot } = getTrackBounds();
+    skier.y = clamp(skier.y, top + PLAYER_TOP_PADDING, bot - PLAYER_BOTTOM_PADDING);
+
+    // lean visual
+    const desiredLean = clamp(skier.vy/650, -0.35, 0.35);
+    skier.lean = lerp(skier.lean, desiredLean, 1 - Math.pow(0.001, dt));
+
+    // distance & score
+    world.distance += world.speed * 26 * dt; // meters-ish
+    if (!world.chillMode) {
+      const speedRatio = world.speed / BASE_SPEED;
+      const speedMultiplier = speedRatio * (1 + FAST_RAMP_BONUS * Math.max(0, speedRatio - 1));
+      world.score += BASE_SCORE_RATE * world.speed * speedMultiplier * dt;
+    }
+
+    // spawn obstacles/pickups
+    if (!world.chillMode) {
+      spawnTimer -= dt * (0.9 + world.speed/6);
+      berryTimer -= dt * (0.8 + world.speed/8);
+
+      if (spawnTimer <= 0) {
+        spawnTimer = rand(0.38, 0.72);
+        const roll = Math.random();
+        if (roll < 0.52) spawnTree();
+        else if (roll < 0.86) spawnRock();
+        else spawnReindeer();
+      }
+
+      if (berryTimer <= 0) {
+        berryTimer = rand(0.7, 1.4);
+        if (Math.random() < 0.75) spawnBerries();
+      }
+    }
+
+    // move obstacles/pickups left based on speed
+    const scrollX = world.speed * 220 * dt;
+    for (const o of obstacles) {
+      o.x -= scrollX;
+      if (o.type === "reindeer") o.x += o.vx; // it walks too
+      if (o.type === "reindeer") o.y += 0.22*Math.sin(world.t*3 + o.phase);
+    }
+    for (const p of pickups) p.x -= scrollX;
+
+    // cull offscreen
+    for (let i=obstacles.length-1;i>=0;i--){
+      if (obstacles[i].x < -120) obstacles.splice(i,1);
+    }
+    for (let i=pickups.length-1;i>=0;i--){
+      if (pickups[i].x < -120) pickups.splice(i,1);
+    }
+
+    // particle update
+    for (let i=snowPuffs.length-1;i>=0;i--){
+      const s = snowPuffs[i];
+      s.x += s.vx * (60*dt);
+      s.y += s.vy * (60*dt);
+      s.life -= 60*dt;
+      s.a *= Math.pow(0.88, 60*dt);
+      if (s.life <= 0 || s.a < 0.02) snowPuffs.splice(i,1);
+    }
+
+    // collisions
+    if (!world.chillMode) {
+      for (const o of obstacles) {
+        const r = (o.type==="tree") ? o.r*0.62 : (o.type==="rock" ? o.r*0.85 : o.r*0.90);
+        if (circleHit(skier.x, skier.y, skier.radius, o.x, o.y, r)) {
+          crash(o.type);
+          break;
+        }
+      }
+    }
+
+    if (!world.chillMode) {
+      for (let i=pickups.length-1;i>=0;i--){
+        const p = pickups[i];
+        if (circleHit(skier.x, skier.y, skier.radius, p.x, p.y, p.r)) {
+          world.score += p.value;
+          puff(p.x, p.y, 10);
+          audio.onPickup();
+          pickups.splice(i,1);
+        }
+      }
+    }
+
+    // update HUD
+    if (!world.chillMode) {
+      scorePill.textContent = `Score: ${Math.floor(world.score)}`;
+      distPill.textContent = `Distance: ${Math.floor(world.distance)} m`;
+      speedPill.textContent = `Speed: ${world.speed.toFixed(1)}`;
+    }
+  }
+
+  function crash(type) {
+    world.alive = false;
+    world.shake = 1.0;
+    puff(skier.x, skier.y, 26);
+    audio.onCrash();
+
+    const why =
+      type==="tree" ? "You clipped a snowy spruce." :
+      type==="rock" ? "You caught an edge on a hidden rock." :
+      "A reindeer wandered into your track.";
+
+    overlayText.innerHTML =
+      `${why}<br><br>Final score: <b>${Math.floor(world.score)}</b> · Distance: <b>${Math.floor(world.distance)} m</b><br>
+       Press <span class="kbd">R</span> to restart.`;
+
+    overlay.style.display = "flex";
+
+    // best
+    const finalScore = Math.floor(world.score);
+    if (finalScore > best) {
+      best = finalScore;
+      localStorage.setItem(STORAGE_KEY, String(best));
+      bestPill.textContent = `Best: ${best}`;
+    }
+  }
+
+  function render() {
+    const w = innerWidth, h = innerHeight;
+
+    // screen shake
+    let shakeX = 0, shakeY = 0;
+    if (world.shake > 0) {
+      shakeX = (Math.random()-0.5) * 10 * world.shake;
+      shakeY = (Math.random()-0.5) * 10 * world.shake;
+      world.shake = Math.max(0, world.shake - 0.03);
+    }
+
+    ctx.save();
+    ctx.translate(shakeX, shakeY);
+
+    drawSky();
+    drawFells();
+    drawGroundAndTrack();
+    drawBottomFence();
+
+    // distant trees parallax silhouettes at horizon
+    drawHorizonSpruceBelt();
+
+    // draw pickups behind obstacles for readability
+    for (const p of pickups) drawBerries(p);
+
+    // draw obstacles
+    for (const o of obstacles) {
+      if (o.type === "tree") drawTree(o);
+      else if (o.type === "rock") drawRock(o);
+      else drawReindeer(o);
+    }
+
+    // particles
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    for (const s of snowPuffs) {
+      ctx.globalAlpha = s.a;
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // skier last (on top)
+    drawSkier();
+
+    // vignette
+    ctx.save();
+    const vg = ctx.createRadialGradient(w*0.5, h*0.65, Math.min(w,h)*0.25, w*0.5, h*0.65, Math.max(w,h)*0.72);
+    vg.addColorStop(0, "rgba(0,0,0,0)");
+    vg.addColorStop(1, "rgba(0,0,0,0.45)");
+    ctx.fillStyle = vg;
+    ctx.fillRect(0,0,w,h);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  function drawHorizonSpruceBelt() {
+    const w = innerWidth, h = innerHeight;
+    const y = h*0.56;
+    const par = (world.distance*0.8) % 120;
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = "#0b2a2e";
+    for (let x=-140; x<w+140; x+=60) {
+      const xx = x - par;
+      const ht = 26 + 12*Math.sin((x*0.08) + world.t*0.6);
+      ctx.beginPath();
+      ctx.moveTo(xx, y);
+      ctx.lineTo(xx+18, y-ht);
+      ctx.lineTo(xx+36, y);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawBottomFence() {
+    const w = innerWidth, h = innerHeight;
+    const { bot } = getTrackBounds(h);
+    const baseY = bot + 14;
+    const spacing = 84;
+    const postW = 8;
+    const postH = 42;
+    const railH = 5;
+    const scroll = (world.distance * 1.15) % spacing;
+
+    ctx.save();
+    ctx.globalAlpha = 0.94;
+
+    // rails between posts
+    for (let x = -spacing * 2; x <= w + spacing * 2; x += spacing) {
+      const px = Math.round(x - scroll);
+
+      const y1 = Math.round(baseY - 16);
+      const y2 = Math.round(baseY - 1);
+
+      ctx.fillStyle = "#805737";
+      ctx.fillRect(px + Math.floor(postW / 2), y1, spacing - postW, railH);
+      ctx.fillRect(px + Math.floor(postW / 2), y2, spacing - postW, railH);
+
+      // darker seam so rails don't look flat
+      ctx.fillStyle = "rgba(64,42,26,0.45)";
+      ctx.fillRect(px + Math.floor(postW / 2), y1 + railH - 1, spacing - postW, 1);
+      ctx.fillRect(px + Math.floor(postW / 2), y2 + railH - 1, spacing - postW, 1);
+    }
+
+    // posts
+    for (let x = -spacing * 2; x <= w + spacing * 2; x += spacing) {
+      const px = Math.round(x - scroll);
+      const py = Math.round(baseY - postH);
+
+      ctx.fillStyle = "#7a5233";
+      ctx.fillRect(px - Math.floor(postW / 2), py, postW, postH + 14);
+
+      // subtle right-edge shading
+      ctx.fillStyle = "rgba(58,36,21,0.35)";
+      ctx.fillRect(px + Math.floor(postW / 2) - 2, py, 2, postH + 14);
+
+      // snow cap
+      ctx.fillStyle = "rgba(236,246,255,0.85)";
+      ctx.fillRect(px - Math.floor(postW / 2) - 1, py - 2, postW + 2, 3);
+    }
+
+    ctx.restore();
+  }
+
+  requestAnimationFrame(step);
+})();
+</script>
+</body>
+</html>
